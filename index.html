@@ -149,6 +149,13 @@
     .controls-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1; }
 
     .search-box { position: relative; min-width: 220px; }
+    .search-clear-btn {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; font-size: 13px; color: var(--text-muted);
+      cursor: pointer; padding: 2px 6px; border-radius: 50%; line-height: 1;
+      display: none; transition: all 0.15s ease;
+    }
+    .search-clear-btn:hover { color: var(--text); background: var(--border); }
     .search-box input {
       width: 100%; padding: 7px 12px 7px 30px; font-size: 13px; border: 1px solid var(--border);
       border-radius: 20px; background: var(--bg); color: var(--text); outline: none;
@@ -370,6 +377,11 @@
   </style>
 </head>
 <body>
+  <!-- Hidden trap to absorb browser password autofill heuristics -->
+  <div style="position: absolute; top: -9999px; left: -9999px; width: 0; height: 0; opacity: 0; overflow: hidden;" aria-hidden="true">
+    <input type="text" name="fake_username_trap" tabindex="-1" autocomplete="username">
+    <input type="password" name="fake_password_trap" tabindex="-1" autocomplete="current-password">
+  </div>
 
   <!-- Top Google Sheets Navbar -->
   <header class="gs-navbar">
@@ -438,7 +450,8 @@
     <div class="controls-left">
       <div class="search-box">
         <span class="search-icon">🔍</span>
-        <input type="text" id="searchInput" placeholder="Поиск агента по нику или рангу..." oninput="renderTable()">
+        <input type="search" id="searchInput" name="agent_search_query" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-form-type="other" placeholder="Поиск агента по нику или рангу..." oninput="handleSearchInput()">
+        <button id="searchClearBtn" class="search-clear-btn" onclick="clearSearchInput(true)" title="Очистить поиск">✕</button>
       </div>
 
       <div class="filter-pills">
@@ -542,17 +555,19 @@
 
       <!-- Tab 3: Email / Password -->
       <div id="authEmailPane" style="display: none;">
-        <div class="form-group">
-          <label>Email администратора:</label>
-          <input type="email" id="authEmail" placeholder="admin@gmail.com">
-        </div>
-        <div class="form-group">
-          <label>Пароль:</label>
-          <input type="password" id="authPassword" placeholder="••••••••">
-        </div>
-        <button class="btn btn-primary" style="width: 100%; justify-content: center;" onclick="loginWithEmail()">
-          Войти
-        </button>
+        <form autocomplete="on" onsubmit="event.preventDefault(); loginWithEmail();">
+          <div class="form-group">
+            <label>Email администратора:</label>
+            <input type="email" id="authEmail" name="auth_admin_email" autocomplete="username" placeholder="admin@gmail.com">
+          </div>
+          <div class="form-group">
+            <label>Пароль:</label>
+            <input type="password" id="authPassword" name="auth_admin_password" autocomplete="current-password" placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+            Войти
+          </button>
+        </form>
       </div>
     </div>
   </div>
@@ -1037,12 +1052,57 @@
     let auth = null;
 
     // Initialize application
+    
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║  ЗАЩИТА ПОИСКА ОТ АВТОЗАПОЛНЕНИЯ БРАУЗЕРОМ И УПРАВЛЕНИЕ ОЧИСТКОЙ║
+    // ╚══════════════════════════════════════════════════════════════════╝
+    function sanitizeSearchInput() {
+      const el = document.getElementById("searchInput");
+      if (!el) return;
+      // Если браузер вставил почту автозаполнением
+      if (el.value && (el.value.includes("@") || el.value.toLowerCase() === OWNER_EMAIL.toLowerCase())) {
+        el.value = "";
+        renderTable();
+      }
+      updateClearBtn();
+    }
+
+    function handleSearchInput() {
+      updateClearBtn();
+      renderTable();
+    }
+
+    function updateClearBtn() {
+      const el = document.getElementById("searchInput");
+      const clearBtn = document.getElementById("searchClearBtn");
+      if (el && clearBtn) {
+        clearBtn.style.display = el.value.trim() ? "inline-block" : "none";
+      }
+    }
+
+    function clearSearchInput(focus) {
+      const el = document.getElementById("searchInput");
+      if (el) {
+        el.value = "";
+        renderTable();
+        updateClearBtn();
+        if (focus) el.focus();
+      }
+    }
+
     function init() {
       initTheme();
       setupFirebase();
       checkKeySession();
+      sanitizeSearchInput();
       renderTable();
       updateBadges();
+
+      // Гарантированная очистка поля поиска от асинхронного автозаполнения браузером
+      setTimeout(sanitizeSearchInput, 50);
+      setTimeout(sanitizeSearchInput, 200);
+      setTimeout(sanitizeSearchInput, 600);
+      setTimeout(sanitizeSearchInput, 1200);
     }
 
     // Theme setup
@@ -2223,6 +2283,10 @@
 
     // Run
     init();
+
+  window.addEventListener("pageshow", sanitizeSearchInput);
+  document.addEventListener("DOMContentLoaded", sanitizeSearchInput);
+
   </script>
 </body>
 </html>
