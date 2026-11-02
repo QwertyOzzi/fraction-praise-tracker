@@ -1,0 +1,39 @@
+name: Security audit checks
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate browser script syntax and security invariants
+        run: |
+          node - <<'JS'
+          const fs = require('fs');
+          const vm = require('vm');
+          const html = fs.readFileSync('index.html', 'utf8');
+          const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
+            .map(match => match[1]).filter(Boolean);
+          if (!scripts.length) throw Error('No inline scripts');
+          scripts.forEach((js, i) => new vm.Script(js, {filename:'inline-script-'+i+'.js'}));
+          const checks = {
+            'No embedded deputy key literal': !/deputyKey\s*:\s*[\x27\x22]/.test(html),
+            'No deputy key input': !html.includes('ctrlDeputyKey'),
+            'Safe HTTP URL validation': html.includes('function safeExternalUrl(value)'),
+            'No inline untrusted command': !html.includes('onclick="copyCommand(')
+              && !html.includes('onclick="issueCommand('),
+            'No inline untrusted admin email': !html.includes('onclick="removeAdminEmail('),
+            'Event listeners for actions': html.includes('data-action="copy-command"')
+              && html.includes('data-action="issue-command"'),
+            'Safe screenshot links': html.includes('safeExternalUrl(t.screenshot)')
+          };
+          console.log(checks);
+          for (const [label, passed] of Object.entries(checks)) {
+            if (!passed) throw Error('Security invariant failed: '+label);
+          }
+          console.log('All inline scripts parsed and static checks passed');
+          JS
