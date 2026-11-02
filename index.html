@@ -1129,8 +1129,11 @@
         if (rankFilter !== "all" && row.rank !== rankFilter) return;
 
         if (searchQuery) {
-          const matchNick = row.fullName.toLowerCase().includes(searchQuery);
-          const matchProof = (row.proof && row.proof.text ? row.proof.text.toLowerCase() : "").includes(searchQuery);
+          const nameStr = (row.fullName || row.nick || '').toLowerCase();
+          const nickStr = (row.nick || '').toLowerCase();
+          const proofStr = (row.proof && row.proof.text ? row.proof.text.toLowerCase() : '');
+          const matchNick = nameStr.includes(searchQuery) || nickStr.includes(searchQuery);
+          const matchProof = proofStr.includes(searchQuery);
           if (!matchNick && !matchProof) return;
         }
 
