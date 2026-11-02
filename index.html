@@ -1242,7 +1242,7 @@
         db.collection("sheets").doc(currentTab).set({
           rows: appData[currentTab],
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).catch(err => {
+        }, { merge: true }).catch(err => {
           console.error("Firestore write failed:", err);
           showToast("Ошибка записи в облако: " + err.message);
         });
