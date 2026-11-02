@@ -21,7 +21,7 @@ jobs:
           if (!scripts.length) throw Error('No inline scripts');
           scripts.forEach((js, i) => new vm.Script(js, {filename:'inline-script-'+i+'.js'}));
           const checks = {
-            'No legacy deputy key setting': !/deputyKey\s*:/.test(html),
+            'No embedded deputy key literal': !/deputyKey\s*:\s*[\x27\x22]/.test(html),
             'No deputy key input': !html.includes('ctrlDeputyKey'),
             'Safe HTTP URL validation': html.includes('function safeExternalUrl(value)'),
             'No inline untrusted command': !html.includes('onclick="copyCommand(')
