@@ -533,7 +533,10 @@
     // ╔══════════════════════════════════════════════════════════════════╗
     // ║  1. КОНФИГУРАЦИЯ FIREBASE (Замените значения при необходимости) ║
     // ╚══════════════════════════════════════════════════════════════════╝
-    const firebaseConfig = {
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║  1. КОНФИГУРАЦИЯ FIREBASE                                        ║
+    // ╚══════════════════════════════════════════════════════════════════╝
+    const FIREBASE_CONFIG = {
       apiKey: "AIzaSyBX7JWz6ay-ozED5ZmKoC7Umn58ae2lvIE",
       authDomain: "fraction-praise.firebaseapp.com",
       projectId: "fraction-praise",
@@ -542,6 +545,7 @@
       appId: "1:207680801962:web:857872d2a88648b8fc14d3",
       measurementId: "G-WXFVQE5NYE"
     };
+    const firebaseConfig = FIREBASE_CONFIG; // алиас для совместимости
     // Список разрешенных почт (клиентская + серверная проверка в firestore.rules)
     const ALLOWED_ADMIN_EMAILS = [
       "goponos12@gmail.com"
@@ -611,36 +615,37 @@
 
     // Setup Firebase & Firestore Real-time listener
     function setupFirebase() {
-      const hasConfig = FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith("ВСТАВЬТЕ");
-      
+      const config = (typeof FIREBASE_CONFIG !== "undefined") ? FIREBASE_CONFIG : (typeof firebaseConfig !== "undefined" ? firebaseConfig : null);
+      const hasConfig = config && config.apiKey && !config.apiKey.startsWith("ВСТАВЬТЕ");
+
       if (!hasConfig || typeof firebase === "undefined") {
-        setCloudStatus(false, "Локальный режим (Firebase не настроен)");
+        setCloudStatus(false, "Локальный режим");
         loadLocalData();
         return;
       }
 
       try {
         if (!firebase.apps.length) {
-          firebase.initializeApp(FIREBASE_CONFIG);
+          firebase.initializeApp(config);
         }
         auth = firebase.auth();
         db = firebase.firestore();
         isFirebaseReady = true;
 
-        setCloudStatus(true, "Облако Firebase подключено");
+        setCloudStatus(true, "Облако подключено (Синхронизация)");
 
-        // Listen for Auth changes
+        // Слушаем изменения авторизации
         auth.onAuthStateChanged(user => {
           currentUser = user;
           handleUserAuth(user);
         });
 
-        // Listen for real-time Firestore updates
+        // Слушаем обновления данных в реальном времени
         listenToFirestore();
 
       } catch (err) {
-        console.warn("Firebase init error, fallback to local:", err);
-        setCloudStatus(false, "Ошибка облака (Локальный режим)");
+        console.error("Firebase init error:", err);
+        setCloudStatus(false, "Ошибка подключения: " + err.message);
         loadLocalData();
       }
     }
@@ -658,14 +663,23 @@
         db.collection("sheets").doc(tab).onSnapshot(doc => {
           if (doc.exists) {
             const data = doc.data();
-            if (data && Array.isArray(data.rows)) {
+            if (data && Array.isArray(data.rows) && data.rows.length > 0) {
               appData[tab] = data.rows;
               renderTable();
               updateBadges();
+              return;
             }
           }
+          // Если документа еще нет в базе, но мы админ - автоматически заливаем начальные данные!
+          if (isAdmin && (!doc.exists || !doc.data() || !doc.data().rows)) {
+            console.log("Автоматическая инициализация вкладки " + tab);
+            db.collection("sheets").doc(tab).set({
+              rows: DEFAULT_DATA[tab],
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }).catch(e => console.warn("Auto-seed error on " + tab, e));
+          }
         }, err => {
-          console.warn("Firestore snapshot error on " + tab + ":", err);
+          console.warn("Firestore snapshot on " + tab + ":", err);
         });
       });
     }
