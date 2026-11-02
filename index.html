@@ -787,11 +787,10 @@
       <!-- Tab 2: Bot & Keys -->
       <div id="settingsPane_bot" style="display: none;">
         <div class="form-group">
-          <label>Секретный ключ для Заместителей (9 ранги):</label>
-          <input type="text" id="ctrlDeputyKey" placeholder="NEXUS-U1B23D-FRNP">
-          <small style="font-size: 11px; color: var(--text-muted); display: block; margin-top: 4px;">
-            Заместители вводят этот ключ в боте: <code>/admin ключ</code>. После ввода вам прилетает запрос с кнопкой одобрения.
-          </small>
+          <p style="font-size: 12px; color: var(--text-muted);">
+            Ключ заместителей настраивается только в Render (DEPUTY_KEY).
+            Не храните ключ доступа в настройках сайта.
+          </p>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
@@ -1954,7 +1953,7 @@
       leaderContact: "https://t.me/frporp_bot",
       techAdminNick: "Gopon (Тех. Администратор)",
       techAdminContact: "https://t.me/frporp_bot",
-      deputyKey: "NEXUS-U1B23D-FRNP",
+
       botUsername: "frporp_bot",
       renderUrl: "https://fraction-praise-bot-1.onrender.com"
     };
@@ -1964,7 +1963,16 @@
       if (!db) return;
       db.collection("config").doc("settings").onSnapshot(doc => {
         if (doc.exists && doc.data()) {
-          systemSettings = Object.assign({}, defaultSystemSettings, doc.data());
+          const settingsData = doc.data();
+          const { deputyKey: legacyKey, ...safeSettings } = settingsData;
+          // Historical credentials must not remain visible in the browser or backups.
+          systemSettings = Object.assign({}, defaultSystemSettings, safeSettings);
+          if (legacyKey !== undefined && currentUser &&
+              (currentUser.email || "").toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+            db.collection("config").doc("settings").update({
+              deputyKey: firebase.firestore.FieldValue.delete()
+            }).catch(err => console.warn("Could not purge legacy key:", err.code));
+          }
         } else {
           systemSettings = Object.assign({}, defaultSystemSettings);
           if (currentUser && currentUser.email && currentUser.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
@@ -2006,8 +2014,6 @@
       const inTechContact = document.getElementById("ctrlTechContact");
       if (inTechContact && !inTechContact.matches(":focus")) inTechContact.value = systemSettings.techAdminContact || "";
 
-      const inDeputyKey = document.getElementById("ctrlDeputyKey");
-      if (inDeputyKey && !inDeputyKey.matches(":focus")) inDeputyKey.value = systemSettings.deputyKey || "NEXUS-U1B23D-FRNP";
 
       const inBotUser = document.getElementById("ctrlBotUsername");
       if (inBotUser && !inBotUser.matches(":focus")) inBotUser.value = systemSettings.botUsername || "frporp_bot";
@@ -2076,17 +2082,11 @@
 
     function saveBotSettings() {
       if (!isOwnerActive()) return;
-      const key = (document.getElementById("ctrlDeputyKey").value || "").trim();
+
       const bot = (document.getElementById("ctrlBotUsername").value || "").trim().replace("@", "");
       const rUrl = (document.getElementById("ctrlRenderUrl").value || "").trim();
 
-      if (!key) {
-        alert("Ключ для заместителей не может быть пустым!");
-        return;
-      }
-
       const payload = {
-        deputyKey: key,
         botUsername: bot || "frporp_bot",
         renderUrl: rUrl || "https://fraction-praise-bot-1.onrender.com",
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2159,7 +2159,7 @@
     function downloadFullBackup() {
       const backup = {
         exportDate: new Date().toISOString(),
-        systemSettings: systemSettings,
+        systemSettings: Object.fromEntries(Object.entries(systemSettings).filter(([k]) => k !== "deputyKey")),
         adminEmails: adminEmailsList,
         fractionrp: appData["fractionrp"] || [],
         praise: appData["praise"] || []
