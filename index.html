@@ -117,6 +117,17 @@
     .btn-success:hover { background: #1b5e20; }
     .btn-warning { background: #e37400; border-color: #e37400; color: white; }
     .btn-warning:hover { background: #b05a00; }
+    .btn-purple { background: linear-gradient(135deg, #7c3aed, #6d28d9); border-color: #6d28d9; color: white; }
+    .btn-purple:hover { background: linear-gradient(135deg, #6d28d9, #5b21b6); border-color: #5b21b6; }
+    .settings-tab-btn {
+      padding: 7px 13px; font-size: 12.5px; font-weight: 500; color: var(--text-muted);
+      border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent;
+      transition: all 0.15s ease; white-space: nowrap;
+    }
+    .settings-tab-btn.active {
+      color: #7c3aed; border-bottom-color: #7c3aed; font-weight: 600;
+    }
+
     .btn-outline { border: 1px solid var(--primary); color: var(--primary); background: transparent; }
     .btn-outline:hover { background: rgba(26,115,232,0.1); }
 
@@ -385,6 +396,7 @@
         <span>✓</span> Выдать всем
       </button>
       <button class="btn btn-outline" id="manageAdminsBtn" style="display:none;" onclick="openAdminsModal()"><span>👥</span> Админы</button>
+      <button class="btn btn-purple" id="controlPanelBtn" style="display:none;" onclick="openControlPanelModal()" title="Панель Технического Администратора"><span>⚙️</span> Панель управления</button>
       <button class="btn btn-warning admin-only" onclick="initFirestoreFromDefaults()" title="Загрузить стартовую таблицу в облако Firebase">
         <span>📦</span> В облако
       </button>
@@ -678,15 +690,18 @@
       <!-- Tab 2: Direct Contact -->
       <div id="supportDirectPane" style="display: none;">
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-          Вы можете написать напрямую руководителю фракции или в нашего официального бота:
+          Вы можете написать действующему руководству фракции, тех. администратору или в официального бота:
         </p>
 
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          <a href="https://t.me/frporp_bot" target="_blank" class="btn btn-primary" style="justify-content: center; padding: 11px; text-decoration: none;">
-            <span>🤖</span> Открыть Telegram-бота @frporp_bot
+          <a id="supportBotLinkBtn" href="https://t.me/frporp_bot" target="_blank" class="btn btn-primary" style="justify-content: center; padding: 11px; text-decoration: none;">
+            <span>🤖</span> Открыть Telegram-бота <span id="supportBotUsernameSpan">@frporp_bot</span>
           </a>
-          <button class="btn btn-outline" style="justify-content: center; padding: 10px;" onclick="contactLeaderTelegram()">
-            <span>👤</span> Написать лидеру фракции (Gomez Addams)
+          <button class="btn btn-outline" style="justify-content: center; padding: 10px;" onclick="contactLeaderAction()">
+            <span>👤</span> Написать лидеру фракции (<span id="supportLeaderNickSpan">Samuel_Norton</span>)
+          </button>
+          <button class="btn btn-outline" style="justify-content: center; padding: 10px; border-color: #7c3aed; color: #7c3aed;" onclick="contactTechAdminAction()">
+            <span>🛠️</span> Написать Тех. Администратору (<span id="supportTechNickSpan">Gopon</span>)
           </button>
         </div>
 
@@ -703,6 +718,163 @@
         </div>
         <div id="supportTicketsContainer" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 6px; background: var(--bg);">
           <div style="text-align: center; color: var(--text-muted); padding: 16px;">Загрузка обращений...</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- Control Panel Modal (Tech Administrator Settings) -->
+  <div class="modal-overlay" id="controlPanelModal">
+    <div class="modal-card" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3 style="display: flex; align-items: center; gap: 8px;">
+          <span>⚙️</span> Панель управления (Тех. Администратор)
+        </h3>
+        <button class="modal-close" onclick="closeControlPanelModal()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);">&times;</button>
+      </div>
+
+      <!-- Settings Navigation Tabs -->
+      <div style="display: flex; border-bottom: 1px solid var(--border); margin-bottom: 14px; gap: 4px; overflow-x: auto;">
+        <button class="settings-tab-btn active" id="tabBtn_leader" onclick="openSettingsTab('leader')">👑 Лидер фракции</button>
+        <button class="settings-tab-btn" id="tabBtn_bot" onclick="openSettingsTab('bot')">🤖 Бот и ключи</button>
+        <button class="settings-tab-btn" id="tabBtn_admins" onclick="openSettingsTab('admins')">👥 Админы сайта</button>
+        <button class="settings-tab-btn" id="tabBtn_backup" onclick="openSettingsTab('backup')">💾 Бэкап и данные</button>
+      </div>
+
+      <!-- Tab 1: Leader & Leadership Appointment -->
+      <div id="settingsPane_leader">
+        <div style="background: rgba(124, 58, 237, 0.08); border: 1px solid rgba(124, 58, 237, 0.25); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; color: var(--text);">
+          🛠️ <strong>Вы — Главный Тех. Администратор.</strong> На этой вкладке вы назначаете действующего лидера организации. Его ник и ссылка для связи мгновенно отобразятся в разделе поддержки и в Telegram-боте.
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label>Никнейм Лидера (Имя_Фамилия):</label>
+            <input type="text" id="ctrlLeaderNick" placeholder="например: Samuel_Norton">
+          </div>
+          <div class="form-group">
+            <label>Должность / Ранг Лидера:</label>
+            <input type="text" id="ctrlLeaderRank" placeholder="например: 10 (Лидер FBI)">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Ссылка для связи с Лидером (Telegram / VK / Discord):</label>
+          <input type="text" id="ctrlLeaderContact" placeholder="например: https://t.me/username или @username">
+        </div>
+
+        <div style="border-top: 1px dashed var(--border); margin: 14px 0 10px 0; padding-top: 10px;">
+          <span style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 8px;">Ваши контакты (Технический Администратор):</span>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Ваш ник / имя:</label>
+              <input type="text" id="ctrlTechNick" placeholder="Gopon (Тех. Админ)">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Ваш контакт для связи:</label>
+              <input type="text" id="ctrlTechContact" placeholder="Telegram ссылка или email">
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="margin-top: 14px;">
+          <button class="btn" onclick="closeControlPanelModal()">Закрыть</button>
+          <button class="btn btn-purple" onclick="saveLeaderSettings()">
+            <span>💾</span> Сохранить Лидера
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 2: Bot & Keys -->
+      <div id="settingsPane_bot" style="display: none;">
+        <div class="form-group">
+          <label>Секретный ключ для Заместителей (9 ранги):</label>
+          <input type="text" id="ctrlDeputyKey" placeholder="NEXUS-U1B23D-FRNP">
+          <small style="font-size: 11px; color: var(--text-muted); display: block; margin-top: 4px;">
+            Заместители вводят этот ключ в боте: <code>/admin ключ</code>. После ввода вам прилетает запрос с кнопкой одобрения.
+          </small>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label>Юзернейм бота в Telegram:</label>
+            <input type="text" id="ctrlBotUsername" placeholder="frporp_bot">
+          </div>
+          <div class="form-group">
+            <label>URL сервера (Render):</label>
+            <input type="text" id="ctrlRenderUrl" placeholder="https://fraction-praise-bot-1.onrender.com">
+          </div>
+        </div>
+
+        <!-- Health Check card -->
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-size: 12px; font-weight: 600;">Статус сервера бота:</div>
+              <div id="ctrlBotHealthBadge" style="font-size: 12px; margin-top: 3px; color: var(--text-muted);">
+                Нажмите «Проверить связь» для пинга
+              </div>
+            </div>
+            <button class="btn btn-mini" onclick="pingBotServer()">
+              <span>📡</span> Проверить связь (Ping)
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="margin-top: 14px;">
+          <button class="btn" onclick="closeControlPanelModal()">Закрыть</button>
+          <button class="btn btn-primary" onclick="saveBotSettings()">
+            <span>💾</span> Сохранить настройки бота
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 3: Admins -->
+      <div id="settingsPane_admins" style="display: none;">
+        <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 10px;">
+          Управление списком email-адресов Google/Firebase, которым разрешен вход в режим редактора таблицы:
+        </p>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <input type="email" id="ctrlNewAdminEmail" placeholder="admin@gmail.com" style="flex: 1; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 13px;">
+          <button class="btn btn-primary" onclick="addAdminFromCtrlPanel()">+ Добавить</button>
+        </div>
+
+        <div id="ctrlAdminsListContainer" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 6px; background: var(--bg);">
+          <div style="text-align: center; color: var(--text-muted); padding: 12px;">Загрузка списка...</div>
+        </div>
+
+        <div class="modal-footer" style="margin-top: 14px;">
+          <button class="btn" onclick="closeControlPanelModal()">Закрыть</button>
+        </div>
+      </div>
+
+      <!-- Tab 4: Backup -->
+      <div id="settingsPane_backup" style="display: none;">
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+          <h4 style="font-size: 13px; margin-bottom: 6px;">📦 Полное резервное копирование (JSON)</h4>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+            Скачайте полную копию базы данных: списки отметок (/fractionrp), похвалы (/praise), список админов и текущие настройки.
+          </p>
+          <button class="btn btn-primary" onclick="downloadFullBackup()">
+            <span>📥</span> Скачать полный бэкап системы
+          </button>
+        </div>
+
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px;">
+          <h4 style="font-size: 13px; margin-bottom: 6px;">🔄 Принудительная синхронизация</h4>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+            Сбросить локальный кэш браузера и заново запросить все актуальные данные из Firebase.
+          </p>
+          <button class="btn btn-outline" onclick="forceSyncFromCloud()">
+            <span>🔄</span> Перезагрузить из облака
+          </button>
+        </div>
+
+        <div class="modal-footer" style="margin-top: 14px;">
+          <button class="btn" onclick="closeControlPanelModal()">Закрыть</button>
         </div>
       </div>
 
@@ -923,6 +1095,7 @@
         // Слушаем обновления данных в реальном времени
         listenToFirestore();
         listenToAdmins();
+        listenToSystemSettings();
 
       } catch (err) {
         console.error("Firebase init error:", err);
@@ -976,8 +1149,11 @@
         const ownerBtn = document.getElementById("manageAdminsBtn");
         if (ownerBtn) ownerBtn.style.display = isOwner ? "inline-flex" : "none";
 
+        const ctrlBtn = document.getElementById("controlPanelBtn");
+        if (ctrlBtn) ctrlBtn.style.display = isOwner ? "inline-flex" : "none";
+
         if (isEmailAllowed) {
-          setAdminState(true, isOwner ? `👑 Владелец: ${email}` : `⭐ Админ: ${email}`);
+          setAdminState(true, isOwner ? `🛠️ Тех. Администратор: ${email}` : `⭐ Админ: ${email}`);
         } else {
           setAdminState(false, null);
           showToast(`Вход выполнен (${email}), но у вас нет прав редактора`);
@@ -986,6 +1162,8 @@
       } else {
         const ownerBtn = document.getElementById("manageAdminsBtn");
         if (ownerBtn) ownerBtn.style.display = "none";
+        const ctrlBtn = document.getElementById("controlPanelBtn");
+        if (ctrlBtn) ctrlBtn.style.display = "none";
         checkKeySession();
       }
     }
@@ -1688,9 +1866,279 @@
       }).catch(e => alert("Ошибка удаления: " + e.message));
     }
 
-    function contactLeaderTelegram() {
-      const url = "https://t.me/frporp_bot";
-      window.open(url, "_blank");
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║  СИСТЕМНЫЕ НАСТРОЙКИ (ТЕХ. АДМИНИСТРАТОР И ЛИДЕР)               ║
+    // ╚══════════════════════════════════════════════════════════════════╝
+    const defaultSystemSettings = {
+      leaderNick: "Samuel_Norton",
+      leaderRank: "10 (Лидер)",
+      leaderContact: "https://t.me/frporp_bot",
+      techAdminNick: "Gopon (Тех. Администратор)",
+      techAdminContact: "https://t.me/frporp_bot",
+      deputyKey: "NEXUS-U1B23D-FRNP",
+      botUsername: "frporp_bot",
+      renderUrl: "https://fraction-praise-bot-1.onrender.com"
+    };
+    let systemSettings = Object.assign({}, defaultSystemSettings);
+
+    function listenToSystemSettings() {
+      if (!db) return;
+      db.collection("config").doc("settings").onSnapshot(doc => {
+        if (doc.exists && doc.data()) {
+          systemSettings = Object.assign({}, defaultSystemSettings, doc.data());
+        } else {
+          systemSettings = Object.assign({}, defaultSystemSettings);
+          if (currentUser && currentUser.email && currentUser.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+            db.collection("config").doc("settings").set(defaultSystemSettings).catch(()=>{});
+          }
+        }
+        updateSettingsUI();
+      }, err => {
+        console.warn("Listen to settings error:", err);
+      });
+    }
+
+    function updateSettingsUI() {
+      const leaderNickSpan = document.getElementById("supportLeaderNickSpan");
+      if (leaderNickSpan) leaderNickSpan.textContent = systemSettings.leaderNick || "Samuel_Norton";
+
+      const techNickSpan = document.getElementById("supportTechNickSpan");
+      if (techNickSpan) techNickSpan.textContent = systemSettings.techAdminNick || "Gopon";
+
+      const botUserSpan = document.getElementById("supportBotUsernameSpan");
+      if (botUserSpan) botUserSpan.textContent = "@" + (systemSettings.botUsername || "frporp_bot");
+
+      const botLinkBtn = document.getElementById("supportBotLinkBtn");
+      if (botLinkBtn) botLinkBtn.href = "https://t.me/" + (systemSettings.botUsername || "frporp_bot");
+
+      // Fill inputs if Control Panel is open
+      const inLeaderNick = document.getElementById("ctrlLeaderNick");
+      if (inLeaderNick && !inLeaderNick.matches(":focus")) inLeaderNick.value = systemSettings.leaderNick || "";
+
+      const inLeaderRank = document.getElementById("ctrlLeaderRank");
+      if (inLeaderRank && !inLeaderRank.matches(":focus")) inLeaderRank.value = systemSettings.leaderRank || "";
+
+      const inLeaderContact = document.getElementById("ctrlLeaderContact");
+      if (inLeaderContact && !inLeaderContact.matches(":focus")) inLeaderContact.value = systemSettings.leaderContact || "";
+
+      const inTechNick = document.getElementById("ctrlTechNick");
+      if (inTechNick && !inTechNick.matches(":focus")) inTechNick.value = systemSettings.techAdminNick || "";
+
+      const inTechContact = document.getElementById("ctrlTechContact");
+      if (inTechContact && !inTechContact.matches(":focus")) inTechContact.value = systemSettings.techAdminContact || "";
+
+      const inDeputyKey = document.getElementById("ctrlDeputyKey");
+      if (inDeputyKey && !inDeputyKey.matches(":focus")) inDeputyKey.value = systemSettings.deputyKey || "NEXUS-U1B23D-FRNP";
+
+      const inBotUser = document.getElementById("ctrlBotUsername");
+      if (inBotUser && !inBotUser.matches(":focus")) inBotUser.value = systemSettings.botUsername || "frporp_bot";
+
+      const inRenderUrl = document.getElementById("ctrlRenderUrl");
+      if (inRenderUrl && !inRenderUrl.matches(":focus")) inRenderUrl.value = systemSettings.renderUrl || "https://fraction-praise-bot-1.onrender.com";
+
+      renderCtrlAdminsList();
+    }
+
+    function openControlPanelModal() {
+      if (!currentUser || currentUser.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+        alert("Доступно только Главному Техническому Администратору!");
+        return;
+      }
+      updateSettingsUI();
+      openSettingsTab("leader");
+      document.getElementById("controlPanelModal").style.display = "flex";
+    }
+
+    function closeControlPanelModal() {
+      document.getElementById("controlPanelModal").style.display = "none";
+    }
+
+    function openSettingsTab(tabName) {
+      const tabs = ["leader", "bot", "admins", "backup"];
+      tabs.forEach(t => {
+        const pane = document.getElementById("settingsPane_" + t);
+        const btn = document.getElementById("tabBtn_" + t);
+        if (pane) pane.style.display = (t === tabName) ? "block" : "none";
+        if (btn) btn.classList.toggle("active", t === tabName);
+      });
+      if (tabName === "admins") {
+        renderCtrlAdminsList();
+      }
+    }
+
+    function saveLeaderSettings() {
+      if (!isOwnerActive()) return;
+      const nick = (document.getElementById("ctrlLeaderNick").value || "").trim();
+      const rank = (document.getElementById("ctrlLeaderRank").value || "").trim();
+      const contact = (document.getElementById("ctrlLeaderContact").value || "").trim();
+      const techNick = (document.getElementById("ctrlTechNick").value || "").trim();
+      const techContact = (document.getElementById("ctrlTechContact").value || "").trim();
+
+      if (!nick) {
+        alert("Пожалуйста, укажите никнейм действующего лидера!");
+        return;
+      }
+
+      const payload = {
+        leaderNick: nick,
+        leaderRank: rank || "10 (Лидер)",
+        leaderContact: contact,
+        techAdminNick: techNick || "Gopon (Тех. Администратор)",
+        techAdminContact: techContact,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+
+      db.collection("config").doc("settings").set(payload, { merge: true }).then(() => {
+        showToast("✅ Действующий Лидер и контакты успешно сохранены!");
+      }).catch(err => {
+        alert("Ошибка сохранения: " + err.message);
+      });
+    }
+
+    function saveBotSettings() {
+      if (!isOwnerActive()) return;
+      const key = (document.getElementById("ctrlDeputyKey").value || "").trim();
+      const bot = (document.getElementById("ctrlBotUsername").value || "").trim().replace("@", "");
+      const rUrl = (document.getElementById("ctrlRenderUrl").value || "").trim();
+
+      if (!key) {
+        alert("Ключ для заместителей не может быть пустым!");
+        return;
+      }
+
+      const payload = {
+        deputyKey: key,
+        botUsername: bot || "frporp_bot",
+        renderUrl: rUrl || "https://fraction-praise-bot-1.onrender.com",
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+
+      db.collection("config").doc("settings").set(payload, { merge: true }).then(() => {
+        showToast("✅ Настройки бота успешно сохранены!");
+      }).catch(err => {
+        alert("Ошибка сохранения: " + err.message);
+      });
+    }
+
+    async function pingBotServer() {
+      const badge = document.getElementById("ctrlBotHealthBadge");
+      const rUrl = (document.getElementById("ctrlRenderUrl").value || systemSettings.renderUrl || "https://fraction-praise-bot-1.onrender.com").replace(/\/+$/, "");
+      badge.innerHTML = '<span style="color:#d97706;">🔄 Проверка отклика сервера Render...</span>';
+
+      const startTime = performance.now();
+      try {
+        const res = await fetch(rUrl + "/health", { method: "GET" });
+        const duration = Math.round(performance.now() - startTime);
+        if (res.ok) {
+          badge.innerHTML = `<span style="color:#10b981; font-weight:600;">🟢 Бот Онлайн! (${duration}ms, HTTP ${res.status})</span>`;
+          showToast(`Бот работает исправно! Отклик: ${duration}ms`);
+        } else {
+          badge.innerHTML = `<span style="color:#ef4444; font-weight:600;">⚠️ Ошибка сервера (${res.status})</span>`;
+        }
+      } catch (err) {
+        badge.innerHTML = `<span style="color:#ef4444; font-weight:600;">🔴 Нет связи (${err.message})</span>`;
+      }
+    }
+
+    function renderCtrlAdminsList() {
+      const container = document.getElementById("ctrlAdminsListContainer");
+      if (!container) return;
+      container.innerHTML = "";
+
+      adminEmailsList.forEach(email => {
+        const isOwner = email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+        const item = document.createElement("div");
+        item.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12.5px;";
+        item.innerHTML = `
+          <div>
+            <strong>${escapeHtml(email)}</strong>
+            ${isOwner ? '<span style="font-size:10px; background:#f3e8ff; color:#7c3aed; padding:1px 6px; border-radius:10px; margin-left:6px; font-weight:600;">Тех. Админ</span>' : '<span style="font-size:10px; background:#e8f0fe; color:#1a73e8; padding:1px 6px; border-radius:10px; margin-left:6px;">Администратор</span>'}
+          </div>
+          ${!isOwner ? `<button class="btn btn-mini" style="color:#ef4444;" onclick="removeAdminEmail('${escapeHtml(email)}')">Удалить</button>` : ''}
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function addAdminFromCtrlPanel() {
+      const input = document.getElementById("ctrlNewAdminEmail");
+      const email = (input.value || "").trim().toLowerCase();
+      if (!email || !email.includes("@")) {
+        alert("Введите корректный email!");
+        return;
+      }
+      if (adminEmailsList.map(e => e.toLowerCase()).includes(email)) {
+        alert("Этот email уже есть в списке!");
+        return;
+      }
+      adminEmailsList.push(email);
+      saveAdminsToFirestore();
+      input.value = "";
+      renderCtrlAdminsList();
+    }
+
+    function downloadFullBackup() {
+      const backup = {
+        exportDate: new Date().toISOString(),
+        systemSettings: systemSettings,
+        adminEmails: adminEmailsList,
+        fractionrp: appData["fractionrp"] || [],
+        praise: appData["praise"] || []
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fraction_praise_backup_${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("💾 Полный бэкап системы успешно скачан!");
+    }
+
+    function forceSyncFromCloud() {
+      if (!isFirebaseReady || !db) {
+        alert("Firebase не подключен!");
+        return;
+      }
+      showToast("🔄 Запрашиваю свежие данные из Firebase...");
+      listenToFirestore();
+      listenToAdmins();
+      listenToSystemSettings();
+      closeControlPanelModal();
+    }
+
+    function isOwnerActive() {
+      if (!currentUser || currentUser.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+        alert("Действие разрешено только Главному Тех. Администратору!");
+        return false;
+      }
+      return true;
+    }
+
+    function contactLeaderAction() {
+      const contact = (systemSettings.leaderContact || "").trim();
+      if (contact.startsWith("http://") || contact.startsWith("https://")) {
+        window.open(contact, "_blank");
+      } else if (contact.startsWith("@")) {
+        window.open("https://t.me/" + contact.replace("@", ""), "_blank");
+      } else if (contact) {
+        window.open("https://t.me/" + contact, "_blank");
+      } else {
+        alert(`Связь с лидером (${systemSettings.leaderNick || "Лидер"}): контакт пока не указан, воспользуйтесь официальным ботом @${systemSettings.botUsername || "frporp_bot"}`);
+      }
+    }
+
+    function contactTechAdminAction() {
+      const contact = (systemSettings.techAdminContact || "").trim();
+      if (contact.startsWith("http://") || contact.startsWith("https://")) {
+        window.open(contact, "_blank");
+      } else if (contact.startsWith("@")) {
+        window.open("https://t.me/" + contact.replace("@", ""), "_blank");
+      } else if (contact.includes("@")) {
+        window.location.href = "mailto:" + contact;
+      } else {
+        window.open("https://t.me/" + (systemSettings.botUsername || "frporp_bot"), "_blank");
+      }
     }
 
     // Run
