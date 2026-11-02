@@ -1096,6 +1096,7 @@
         listenToFirestore();
         listenToAdmins();
         listenToSystemSettings();
+        listenToSupportTickets();
 
       } catch (err) {
         console.error("Firebase init error:", err);
@@ -1747,7 +1748,7 @@
       }
     }
 
-    function submitSupportTicket() {
+    async function submitSupportTicket() {
       const nick = (document.getElementById("supNick").value || "").trim();
       const contact = (document.getElementById("supContact").value || "").trim();
       const category = document.getElementById("supCategory").value;
@@ -1764,26 +1765,51 @@
         description: desc,
         screenshot: screenshot || "",
         status: "Новое",
+        source: "site",
         createdAt: new Date().toISOString()
       };
 
-      if (isFirebaseReady && db) {
-        db.collection("support_tickets").add({
-          ...ticketData,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        }).then(() => {
-          showToast("Обращение успешно отправлено лидеру!");
-          document.getElementById("supNick").value = "";
-          document.getElementById("supContact").value = "";
-          document.getElementById("supDescription").value = "";
-          document.getElementById("supScreenshot").value = "";
-          closeSupportModal();
-        }).catch(err => {
-          console.warn("Firestore support write error:", err);
-          saveLocalTicket(ticketData);
+      showToast("⏳ Отправка обращения...");
+
+      // 1. Отправляем через надежный API бота на Render (пишет в Firebase от имени админа и шлёт alert в TG)
+      let sentViaBot = false;
+      try {
+        const renderUrl = (systemSettings.renderUrl || "https://fraction-praise-bot-1.onrender.com").replace(/\/+$/, "");
+        const res = await fetch(renderUrl + "/api/support", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ticketData)
         });
-      } else {
+        if (res.ok) {
+          sentViaBot = true;
+          console.log("Ticket submitted via bot API bridge");
+        }
+      } catch (e) {
+        console.warn("Bot API submit error:", e);
+      }
+
+      // 2. Если пользователь залогинен в Firebase и бот недоступен, пишем напрямую в Firestore
+      if (!sentViaBot && isFirebaseReady && db) {
+        try {
+          await db.collection("support_tickets").add({
+            ...ticketData,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          sentViaBot = true;
+        } catch (err) {
+          console.warn("Direct Firestore write error:", err);
+        }
+      }
+
+      if (!sentViaBot) {
         saveLocalTicket(ticketData);
+      } else {
+        showToast("✅ Обращение успешно отправлено руководству!");
+        document.getElementById("supNick").value = "";
+        document.getElementById("supContact").value = "";
+        document.getElementById("supDescription").value = "";
+        document.getElementById("supScreenshot").value = "";
+        closeSupportModal();
       }
     }
 
@@ -1795,28 +1821,45 @@
       closeSupportModal();
     }
 
-    function loadSupportTickets() {
-      const container = document.getElementById("supportTicketsContainer");
-      if (!container) return;
-
-      if (isFirebaseReady && db) {
-        db.collection("support_tickets").orderBy("timestamp", "desc").limit(30).get().then(snap => {
-          supportTicketsList = [];
-          snap.forEach(doc => {
-            supportTicketsList.push({ id: doc.id, ...doc.data() });
-          });
-          renderSupportTickets();
-        }).catch(err => {
-          console.warn("Could not fetch support_tickets:", err);
-          const local = JSON.parse(localStorage.getItem("az_support_tickets") || "[]");
-          supportTicketsList = local;
-          renderSupportTickets();
+    function listenToSupportTickets() {
+      if (!db) return;
+      db.collection("support_tickets").onSnapshot(snap => {
+        supportTicketsList = [];
+        snap.forEach(doc => {
+          supportTicketsList.push({ id: doc.id, ...doc.data() });
         });
-      } else {
+        supportTicketsList.sort((a, b) => {
+          const tA = a.timestamp && a.timestamp.toMillis ? a.timestamp.toMillis() : new Date(a.createdAt || 0).getTime();
+          const tB = b.timestamp && b.timestamp.toMillis ? b.timestamp.toMillis() : new Date(b.createdAt || 0).getTime();
+          return tB - tA;
+        });
+        renderSupportTickets();
+      }, err => {
+        console.warn("Could not listen to support_tickets:", err);
+      });
+    }
+
+    function loadSupportTickets() {
+      if (!isFirebaseReady || !db) {
         const local = JSON.parse(localStorage.getItem("az_support_tickets") || "[]");
         supportTicketsList = local;
         renderSupportTickets();
+        return;
       }
+      db.collection("support_tickets").get().then(snap => {
+        supportTicketsList = [];
+        snap.forEach(doc => {
+          supportTicketsList.push({ id: doc.id, ...doc.data() });
+        });
+        supportTicketsList.sort((a, b) => {
+          const tA = a.timestamp && a.timestamp.toMillis ? a.timestamp.toMillis() : new Date(a.createdAt || 0).getTime();
+          const tB = b.timestamp && b.timestamp.toMillis ? b.timestamp.toMillis() : new Date(b.createdAt || 0).getTime();
+          return tB - tA;
+        });
+        renderSupportTickets();
+      }).catch(err => {
+        console.warn("Fetch support tickets error:", err);
+      });
     }
 
     function renderSupportTickets() {
@@ -1824,11 +1867,17 @@
       const badge1 = document.getElementById("supportBadgeCount");
       const badge2 = document.getElementById("supportBadgeCountInner");
 
-      if (badge1) badge1.textContent = supportTicketsList.length;
-      if (badge2) badge2.textContent = supportTicketsList.length;
+      const count = supportTicketsList.length;
+      if (badge1) {
+        badge1.textContent = count;
+        badge1.style.display = count > 0 ? "inline-block" : "none";
+      }
+      if (badge2) {
+        badge2.textContent = count;
+      }
 
       if (!container) return;
-      if (supportTicketsList.length === 0) {
+      if (count === 0) {
         container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 18px; font-size: 13px;">Обращений пока нет 🎉</div>';
         return;
       }
@@ -1838,23 +1887,54 @@
         const card = document.createElement("div");
         card.className = "ticket-card";
         const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+        
+        const isFromTg = t.source === "telegram";
+        const srcBadge = isFromTg 
+          ? '<span style="font-size:10px; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:6px; font-weight:600; margin-right:4px;">📱 Telegram</span>'
+          : '<span style="font-size:10px; background:#f3e8ff; color:#7c3aed; padding:2px 6px; border-radius:6px; font-weight:600; margin-right:4px;">🌐 Сайт</span>';
+
+        const statusLabel = t.status || "Новое";
+        let statusBadge = '<span style="font-size:10px; background:#dcfce7; color:#15803d; padding:2px 6px; border-radius:6px; font-weight:600;">' + escapeHtml(statusLabel) + '</span>';
+        if (statusLabel === "В работе") {
+          statusBadge = '<span style="font-size:10px; background:#fef3c7; color:#b45309; padding:2px 6px; border-radius:6px; font-weight:600;">В работе</span>';
+        } else if (statusLabel === "Решено") {
+          statusBadge = '<span style="font-size:10px; background:#f1f5f9; color:#475569; padding:2px 6px; border-radius:6px; font-weight:600;">Решено</span>';
+        }
+
         card.innerHTML = `
           <div class="ticket-header">
             <div>
+              ${srcBadge}
               <span class="ticket-badge">${escapeHtml(t.category || "Баг")}</span>
               <strong>${escapeHtml(t.nick || "Аноним")}</strong>
               ${t.contact ? `<span style="color: var(--text-muted); font-size: 11px;">(${escapeHtml(t.contact)})</span>` : ""}
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
+              ${statusBadge}
               <span style="font-size: 11px; color: var(--text-muted);">${dateStr}</span>
-              ${isAdmin && t.id ? `<button class="btn-icon" onclick="deleteSupportTicket('${t.id}')" title="Удалить">✕</button>` : ""}
+              ${isAdmin && t.id ? `<button class="btn-icon" onclick="deleteSupportTicket('${t.id}')" title="Удалить обращение">✕</button>` : ""}
             </div>
           </div>
-          <div style="font-size: 12.5px; margin-top: 4px; line-height: 1.4;">${escapeHtml(t.description || "")}</div>
-          ${t.screenshot ? `<div style="margin-top: 6px;"><a href="${t.screenshot}" target="_blank" class="proof-link" style="font-size: 11.5px;">🔗 Скриншот проблемы</a></div>` : ""}
+          <div style="font-size: 12.5px; margin-top: 5px; line-height: 1.45; white-space: pre-wrap;">${escapeHtml(t.description || "")}</div>
+          ${t.screenshot ? `<div style="margin-top: 6px;"><a href="${escapeHtml(t.screenshot)}" target="_blank" class="proof-link" style="font-size: 11.5px;">🔗 Скриншот проблемы</a></div>` : ""}
+          ${isAdmin && t.id && t.status !== "Решено" ? `
+            <div style="display: flex; gap: 6px; margin-top: 8px;">
+              ${t.status !== "В работе" ? `<button class="btn btn-mini" onclick="updateTicketStatus('${t.id}', 'В работе')">🟡 В работу</button>` : ""}
+              <button class="btn btn-mini btn-success" onclick="updateTicketStatus('${t.id}', 'Решено')">✅ Решено</button>
+            </div>
+          ` : ""}
         `;
         container.appendChild(card);
       });
+    }
+
+    function updateTicketStatus(id, newStatus) {
+      if (!isAdmin || !isFirebaseReady || !db) return;
+      db.collection("support_tickets").doc(id).update({
+        status: newStatus
+      }).then(() => {
+        showToast("Статус обновлен: " + newStatus);
+      }).catch(e => alert("Ошибка обновления: " + e.message));
     }
 
     function deleteSupportTicket(id) {
@@ -1862,7 +1942,6 @@
       if (!confirm("Удалить это обращение?")) return;
       db.collection("support_tickets").doc(id).delete().then(() => {
         showToast("Обращение удалено");
-        loadSupportTickets();
       }).catch(e => alert("Ошибка удаления: " + e.message));
     }
 
@@ -2104,6 +2183,7 @@
       listenToFirestore();
       listenToAdmins();
       listenToSystemSettings();
+        listenToSupportTickets();
       closeControlPanelModal();
     }
 
