@@ -1342,14 +1342,27 @@
           ? `/fractionrp ${row.nick}`
           : `/praise ${row.nick}`;
 
+        const safeProofUrl = (value) => {
+          try {
+            const url = new URL(String(value), window.location.href);
+            if (!['https:', 'http:'].includes(url.protocol)) return null;
+            return escapeHtml(url.href).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+          } catch (_) {
+            return null;
+          }
+        };
         let proofHtml = '<span style="color: var(--text-muted);">-</span>';
         if (row.proof) {
           const links = row.proof.links || [];
           if (links.length > 0) {
-            proofHtml = links.map(l => `<a href="${l.url}" target="_blank" class="proof-link">${l.text}</a>`).join(' ');
+            proofHtml = links.map(l => {
+              const url = safeProofUrl(l.url);
+              return url ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="proof-link">${escapeHtml(l.text || 'ссылка')}</a>` : '';
+            }).join(' ');
           } else if (row.proof.text) {
             if (row.proof.text.startsWith('http')) {
-              proofHtml = `<a href="${row.proof.text}" target="_blank" class="proof-link">ссылка</a>`;
+              const url = safeProofUrl(row.proof.text);
+              proofHtml = url ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="proof-link">ссылка</a>` : '';
             } else {
               proofHtml = `<span>${escapeHtml(row.proof.text)}</span>`;
             }
