@@ -30,7 +30,7 @@ service cloud.firestore {
       allow read, write: if isOwner();
     }
     match /support_tickets/{ticketId} {
-      allow create: if request.resource.data.keys().hasOnly(['nick','contact','category','description','screenshot','status','source','createdAt','timestamp']) &&
+      allow create: if isAdmin() || (request.resource.data.keys().hasOnly(['nick','contact','category','description','screenshot','status','source','createdAt','timestamp']) &&
         request.resource.data.nick is string && request.resource.data.nick.size() <= 80 &&
         request.resource.data.description is string && request.resource.data.description.size() > 0 &&
         request.resource.data.description.size() <= 4000 &&
@@ -38,7 +38,7 @@ service cloud.firestore {
         request.resource.data.category is string && request.resource.data.category.size() <= 80 &&
         request.resource.data.screenshot is string && request.resource.data.screenshot.size() <= 1000 &&
         request.resource.data.status == 'Новое' &&
-        request.resource.data.source == 'site';
+        request.resource.data.source == 'site');
       allow read, update, delete: if isAdmin();
     }
   }
