@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  <!-- Base Document Sheet -->
+  <path fill="#0F9D58" filter="url(#shadow)" d="M37 45H11c-2.2 0-4-1.8-4-4V7c0-2.2 1.8-4 4-4h18l12 12v26c0 2.2-1.8 4-4 4z"/>
+  <!-- Folded Corner -->
+  <path fill="#87CEAC" d="M29 3v12h12L29 3z"/>
+  <!-- Sheet Table Grid -->
+  <rect x="13" y="19" width="22" height="18" rx="2" fill="#ffffff" fill-opacity="0.95"/>
+  <rect x="14.5" y="20.5" width="9" height="4" fill="#0F9D58"/>
+  <rect x="24.5" y="20.5" width="9" height="4" fill="#0F9D58"/>
+  <rect x="14.5" y="25.5" width="9" height="4.5" fill="#E8F5E9"/>
+  <rect x="24.5" y="25.5" width="9" height="4.5" fill="#E8F5E9"/>
+  <rect x="14.5" y="31" width="9" height="4.5" fill="#E8F5E9"/>
+  <rect x="24.5" y="31" width="9" height="4.5" fill="#E8F5E9"/>
+</svg>
