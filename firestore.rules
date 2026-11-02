@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: check if user's email is in the admin list
+    function isAdmin() {
+      return request.auth != null &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email in get(/databases/$(database)/documents/config/admins).data.emails;
+    }
+
+    // Sheet data (fractionrp, praise) — anyone reads, only admins write
+    match /sheets/{sheetId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Admin config — anyone reads (to check UI permissions), nobody writes via client SDK
+    // To modify the admin list, use the Firebase Console directly
+    match /config/{configId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

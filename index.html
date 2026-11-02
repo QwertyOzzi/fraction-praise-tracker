@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Выдача похвалы и отметок - Google Таблицы (Arizona RP)</title>
+  
+  <!-- Firebase SDK (Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <style>
+    :root {
+      --bg: #f8f9fa;
+      --card-bg: #ffffff;
+      --text: #202124;
+      --text-muted: #5f6368;
+      --border: #dadce0;
+      --header-bg: #a63a32;
+      --header-text: #ffffff;
+      --row-hover: #f1f3f4;
+      --status-issued-bg: #b7e1cd;
+      --status-issued-text: #0d652d;
+      --status-pending-bg: #0c5394;
+      --status-pending-text: #ffffff;
+      --btn-plus: #2e7d32;
+      --btn-minus: #c62828;
+      --primary: #1a73e8;
+      --primary-hover: #1557b0;
+      --badge-rank: #e8f0fe;
+      --badge-rank-text: #1967d2;
+      --code-bg: #e8eaed;
+      --code-text: #202124;
+      --toast-bg: #323232;
+      --toast-text: #ffffff;
+    }
+
+    [data-theme="dark"] {
+      --bg: #1e1f22;
+      --card-bg: #2b2d30;
+      --text: #f0f3f6;
+      --text-muted: #9aa0a6;
+      --border: #3c4043;
+      --header-bg: #7f231c;
+      --header-text: #ffffff;
+      --row-hover: #35373c;
+      --status-issued-bg: #1e4620;
+      --status-issued-text: #a8dab5;
+      --status-pending-bg: #154a7d;
+      --status-pending-text: #d2e3fc;
+      --btn-plus: #388e3c;
+      --btn-minus: #d32f2f;
+      --primary: #8ab4f8;
+      --primary-hover: #aecbfa;
+      --badge-rank: #303d4e;
+      --badge-rank-text: #adc8ff;
+      --code-bg: #1e1f22;
+      --code-text: #e8eaed;
+      --toast-bg: #202124;
+      --toast-text: #ffffff;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; transition: background 0.2s, color 0.2s; }
+
+    /* Top Google Sheets Navbar */
+    .gs-navbar {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .navbar-left { display: flex; align-items: center; gap: 12px; }
+    .sheets-icon {
+      width: 32px; height: 32px; background: #0f9d58; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-weight: bold; font-size: 18px;
+    }
+
+    .file-details h1 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .file-details .badge-tag {
+      font-size: 11px; background: var(--badge-rank); color: var(--badge-rank-text);
+      padding: 2px 6px; border-radius: 4px; font-weight: 500;
+    }
+    .file-details p { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot-green { background: #0f9d58; }
+    .dot-yellow { background: #f4b400; }
+    .dot-blue { background: #1a73e8; }
+
+    .navbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .btn {
+      padding: 6px 12px; font-size: 13px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--card-bg); color: var(--text); cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px; font-weight: 500;
+      transition: all 0.15s ease; user-select: none;
+    }
+    .btn:hover { background: var(--row-hover); border-color: #bbb; }
+    .btn-primary { background: #1a73e8; border-color: #1a73e8; color: white; }
+    .btn-primary:hover { background: #1557b0; border-color: #1557b0; }
+    .btn-success { background: #2e7d32; border-color: #2e7d32; color: white; }
+    .btn-success:hover { background: #1b5e20; }
+    .btn-warning { background: #e37400; border-color: #e37400; color: white; }
+    .btn-warning:hover { background: #b05a00; }
+    .btn-outline { border: 1px solid var(--primary); color: var(--primary); background: transparent; }
+    .btn-outline:hover { background: rgba(26,115,232,0.1); }
+
+    /* Mode Banner */
+    .mode-banner {
+      padding: 6px 16px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+    .mode-banner.readonly { background: #fff8e1; color: #8d6e63; border-color: #ffe082; }
+    [data-theme="dark"] .mode-banner.readonly { background: #3e2723; color: #ffe082; border-color: #5d4037; }
+    .mode-banner.admin { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
+    [data-theme="dark"] .mode-banner.admin { background: #1b5e20; color: #a5d6a7; border-color: #2e7d32; }
+
+    /* Controls Bar */
+    .controls-bar {
+      padding: 10px 16px; background: var(--card-bg); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    }
+    .controls-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1; }
+
+    .search-box { position: relative; min-width: 220px; }
+    .search-box input {
+      width: 100%; padding: 7px 12px 7px 30px; font-size: 13px; border: 1px solid var(--border);
+      border-radius: 20px; background: var(--bg); color: var(--text); outline: none;
+    }
+    .search-box input:focus { border-color: var(--primary); }
+    .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 13px; }
+
+    .filter-pills { display: flex; align-items: center; gap: 5px; }
+    .pill {
+      padding: 4px 10px; border-radius: 14px; font-size: 12px; font-weight: 500; cursor: pointer;
+      border: 1px solid var(--border); background: var(--card-bg); color: var(--text-muted);
+    }
+    .pill.active { background: #1a73e8; border-color: #1a73e8; color: white; }
+
+    .stats-badge { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+
+    /* Main Container */
+    .main-container { flex: 1; padding: 14px; max-width: 1550px; width: 100%; margin: 0 auto; overflow-x: auto; }
+
+    .table-wrapper {
+      background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden;
+    }
+
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+    thead tr { background: var(--header-bg); color: var(--header-text); }
+    th { padding: 10px 12px; font-weight: 600; font-size: 13px; user-select: none; white-space: nowrap; }
+    th.col-num { width: 45px; text-align: center; }
+    th.col-agent { min-width: 200px; }
+    th.col-status { width: 130px; text-align: center; }
+    th.col-qty { width: 190px; text-align: center; }
+    th.col-command { min-width: 250px; }
+    th.col-proof { min-width: 180px; }
+    th.col-actions { width: 60px; text-align: center; }
+
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+    tbody tr:hover { background-color: var(--row-hover); }
+    td { padding: 8px 12px; vertical-align: middle; }
+    .cell-num { text-align: center; color: var(--text-muted); font-size: 12px; }
+
+    .agent-cell { display: flex; align-items: center; gap: 8px; }
+    .agent-name { font-weight: 600; color: var(--text); font-size: 13.5px; }
+    .agent-rank {
+      font-size: 11px; font-weight: 600; background: var(--badge-rank);
+      color: var(--badge-rank-text); padding: 2px 6px; border-radius: 10px;
+    }
+
+    .status-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 4px 10px; border-radius: 14px; font-size: 12px; font-weight: 600;
+      min-width: 100px; text-align: center; user-select: none;
+    }
+    .status-badge.editable { cursor: pointer; transition: transform 0.12s; }
+    .status-badge.editable:hover { transform: scale(1.03); }
+    .status-issued { background: var(--status-issued-bg); color: var(--status-issued-text); }
+    .status-pending { background: var(--status-pending-bg); color: var(--status-pending-text); }
+
+    /* Quantity Controls */
+    .qty-control { display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .btn-qty {
+      width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--card-bg); color: var(--text); display: flex; align-items: center;
+      justify-content: center; font-size: 17px; font-weight: bold; cursor: pointer; user-select: none;
+    }
+    .btn-qty:hover { transform: scale(1.08); }
+    .btn-minus { color: var(--btn-minus); border-color: rgba(198, 40, 40, 0.3); }
+    .btn-minus:hover { background: rgba(198, 40, 40, 0.1); }
+    .btn-plus { color: var(--btn-plus); border-color: rgba(46, 125, 50, 0.3); }
+    .btn-plus:hover { background: rgba(46, 125, 50, 0.1); }
+
+    .qty-input {
+      width: 48px; height: 30px; text-align: center; font-size: 14px; font-weight: 700;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+      color: var(--text); outline: none;
+    }
+    .qty-input:read-only { border: none; background: transparent; cursor: default; }
+
+    .btn-mini {
+      padding: 2px 5px; font-size: 11px; border-radius: 4px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text-muted); cursor: pointer;
+    }
+    .btn-mini:hover { background: var(--border); color: var(--text); }
+
+    /* SAMP Command block */
+    .command-box { display: flex; align-items: center; gap: 6px; }
+    .cmd-text {
+      font-family: Consolas, monospace; font-size: 12px; background: var(--code-bg);
+      color: var(--code-text); padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border);
+      flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: all;
+    }
+    .cmd-copy-btn {
+      padding: 4px 8px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border);
+      background: var(--card-bg); color: var(--text); cursor: pointer; font-weight: 500;
+      display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+    }
+    .cmd-copy-btn:hover { background: #1a73e8; border-color: #1a73e8; color: white; }
+    .cmd-done-btn {
+      padding: 4px 8px; font-size: 11px; border-radius: 4px; border: 1px solid rgba(46, 125, 50, 0.4);
+      background: var(--status-issued-bg); color: var(--status-issued-text); cursor: pointer;
+      font-weight: 600; white-space: nowrap;
+    }
+    .cmd-done-btn:hover { filter: brightness(0.9); }
+
+    .proof-links { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .proof-link { color: #1a73e8; text-decoration: underline; font-size: 12.5px; font-weight: 500; }
+    .proof-link:hover { color: #0d47a1; }
+
+    .btn-icon {
+      background: transparent; border: none; color: var(--text-muted); cursor: pointer;
+      padding: 4px; border-radius: 4px; font-size: 14px;
+    }
+    .btn-icon:hover { background: rgba(0,0,0,0.06); color: #c62828; }
+
+    /* Bottom Tabs */
+    .gs-tabs-bar {
+      background: var(--card-bg); border-top: 1px solid var(--border); padding: 0 16px;
+      display: flex; align-items: center; gap: 4px; position: sticky; bottom: 0; z-index: 100;
+    }
+    .gs-tab {
+      padding: 9px 16px; font-size: 13px; font-weight: 600; color: var(--text-muted);
+      border-bottom: 3px solid transparent; cursor: pointer; display: inline-flex;
+      align-items: center; gap: 6px; user-select: none;
+    }
+    .gs-tab:hover { background: var(--row-hover); color: var(--text); }
+    .gs-tab.active { color: #1a73e8; border-bottom-color: #1a73e8; background: var(--row-hover); }
+    .tab-badge {
+      font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #0c5394;
+      color: white; font-weight: bold;
+    }
+
+    /* Modals */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(2px);
+    }
+    .modal-card {
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+      width: 90%; max-width: 450px; padding: 22px; box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .modal-header h3 { font-size: 17px; }
+    .form-group { margin-bottom: 13px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 5px; }
+    .form-group input, .form-group select {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--bg); color: var(--text); font-size: 13px; outline: none;
+    }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 55px; right: 20px; background: var(--toast-bg);
+      color: var(--toast-text); padding: 9px 16px; border-radius: 8px; font-size: 13px;
+      font-weight: 500; box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 2000;
+      transform: translateY(20px); opacity: 0; pointer-events: none; transition: all 0.2s ease;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
+
+    .admin-only { display: none !important; }
+    body.is-admin .admin-only { display: inline-flex !important; }
+    body.is-admin .admin-only-block { display: block !important; }
+    body.is-admin .admin-only-cell { display: table-cell !important; }
+
+    .auth-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+    .auth-tab {
+      padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: 500;
+      color: var(--text-muted); border-bottom: 2px solid transparent;
+    }
+    .auth-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <!-- Top Google Sheets Navbar -->
+  <header class="gs-navbar">
+    <div class="navbar-left">
+      <div class="sheets-icon">📊</div>
+      <div class="file-details">
+        <h1>
+          Выдача похвалы и отметок
+          <span class="badge-tag">Arizona RP</span>
+        </h1>
+        <p>
+          <span class="status-dot dot-yellow" id="cloudDot"></span>
+          <span id="cloudStatusText">Инициализация...</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="navbar-actions">
+      <!-- Admin Actions (hidden for regular viewers) -->
+      <button class="btn btn-primary admin-only" onclick="openAddModal()">
+        <span>+</span> Добавить агента
+      </button>
+      <button class="btn btn-success admin-only" onclick="markAllFilteredAsIssued()" title="Выдать всем со статусом «На выдаче»">
+        <span>✓</span> Выдать всем
+      </button>
+      <button class="btn btn-warning admin-only" onclick="initFirestoreFromDefaults()" title="Загрузить стартовую таблицу в облако Firebase">
+        <span>📦</span> В облако
+      </button>
+
+      <!-- Public Actions -->
+      <button class="btn" onclick="exportData()" title="Скачать данные таблицы">
+        <span>💾</span> Экспорт
+      </button>
+      
+      <!-- Auth / Access Button -->
+      <div id="authContainer">
+        <button class="btn btn-outline" id="loginBtn" onclick="openAuthModal()">
+          <span>🔐</span> Войти / Доступ
+        </button>
+      </div>
+
+      <!-- Theme Toggle -->
+      <button class="btn" id="themeToggleBtn" onclick="toggleTheme()" title="Переключить тему">
+        <span>🌙</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Access Mode Banner -->
+  <div class="mode-banner readonly" id="modeBanner">
+    <div>
+      <span id="bannerText">👁️ <strong>Режим просмотра:</strong> вы можете искать игроков и копировать команды. Для изменения отметок (+ / -) требуется авторизация администратора.</span>
+    </div>
+    <div>
+      <span id="adminEmailBadge" style="font-weight: 600;"></span>
+    </div>
+  </div>
+
+  <!-- Controls & Filters Bar -->
+  <section class="controls-bar">
+    <div class="controls-left">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" placeholder="Поиск агента по нику или рангу..." oninput="renderTable()">
+      </div>
+
+      <div class="filter-pills">
+        <div class="pill active" data-filter="all" onclick="setFilter('all', this)">Все</div>
+        <div class="pill" data-filter="pending" onclick="setFilter('pending', this)">На выдаче</div>
+        <div class="pill" data-filter="issued" onclick="setFilter('issued', this)">Выдано</div>
+      </div>
+
+      <select id="rankFilter" onchange="renderTable()" style="padding: 5px 8px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
+        <option value="all">Все ранги</option>
+        <option value="X">Ранг X (10)</option>
+        <option value="8">Ранг 8</option>
+        <option value="7">Ранг 7</option>
+        <option value="6">Ранг 6</option>
+        <option value="5">Ранг 5</option>
+        <option value="4">Ранг 4</option>
+      </select>
+    </div>
+
+    <div class="stats-badge" id="statsText">
+      Загрузка...
+    </div>
+  </section>
+
+  <!-- Main Table -->
+  <main class="main-container">
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-num">#</th>
+            <th class="col-agent">Агент</th>
+            <th class="col-status">СТАТУС</th>
+            <th class="col-qty">Количество</th>
+            <th class="col-command">Команда для выдачи в игре</th>
+            <th class="col-proof">Доказательство выдачи</th>
+            <th class="col-actions admin-only-cell admin-only"></th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+          <!-- Dynamically populated -->
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Google Sheets Tab Switcher at Bottom -->
+  <footer class="gs-tabs-bar">
+    <div class="gs-tab active" id="tabFractionrp" onclick="switchTab('fractionrp')">
+      /fractionrp
+      <span class="tab-badge" id="badgeFractionrp">0</span>
+    </div>
+    <div class="gs-tab" id="tabPraise" onclick="switchTab('praise')">
+      /praise
+      <span class="tab-badge" id="badgePraise">0</span>
+    </div>
+  </footer>
+
+  <!-- Modal: Auth / Access -->
+  <div class="modal-overlay" id="authModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Доступ к редактированию</h3>
+        <button class="btn-icon" onclick="closeAuthModal()">✕</button>
+      </div>
+
+      <div class="auth-tabs">
+        <div class="auth-tab active" id="tabGoogleBtn" onclick="switchAuthTab('google')">Google (Почта)</div>
+        <div class="auth-tab" id="tabKeyBtn" onclick="switchAuthTab('key')">Секретный ключ</div>
+        <div class="auth-tab" id="tabEmailBtn" onclick="switchAuthTab('email')">Email и пароль</div>
+      </div>
+
+      <!-- Tab 1: Google 1-Click Login -->
+      <div id="authGooglePane">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+          Нажмите кнопку ниже, чтобы войти через аккаунт Google без регистрации. Если ваша почта указана в списке администраторов — доступ к <strong>[+]</strong> и <strong>[-]</strong> откроется автоматически.
+        </p>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center; padding: 10px;" onclick="loginWithGoogle()">
+          <span>🌐</span> Войти через Google
+        </button>
+      </div>
+
+      <!-- Tab 2: Key / Password System -->
+      <div id="authKeyPane" style="display: none;">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+          Введите секретный мастер-ключ или PIN-код лидера для локальной активации прав редактирования:
+        </p>
+        <div class="form-group">
+          <label>Ключ доступа:</label>
+          <input type="password" id="secretKeyInput" placeholder="Введите ключ доступа...">
+        </div>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center;" onclick="verifyAccessKey()">
+          Активировать доступ
+        </button>
+      </div>
+
+      <!-- Tab 3: Email / Password -->
+      <div id="authEmailPane" style="display: none;">
+        <div class="form-group">
+          <label>Email администратора:</label>
+          <input type="email" id="authEmail" placeholder="admin@gmail.com">
+        </div>
+        <div class="form-group">
+          <label>Пароль:</label>
+          <input type="password" id="authPassword" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center;" onclick="loginWithEmail()">
+          Войти
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add Agent -->
+  <div class="modal-overlay" id="addModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Добавить агента</h3>
+        <button class="btn-icon" onclick="closeAddModal()">✕</button>
+      </div>
+      <div class="form-group">
+        <label>Никнейм игрока (например, Samuel_Norton):</label>
+        <input type="text" id="newNick" placeholder="Samuel_Norton">
+      </div>
+      <div class="form-group">
+        <label>Ранг в скобках (например, 8 или X):</label>
+        <input type="text" id="newRank" placeholder="8">
+      </div>
+      <div class="form-group">
+        <label>Количество (баллы/похвала):</label>
+        <input type="number" id="newQty" value="1" min="0">
+      </div>
+      <div class="form-group">
+        <label>Статус:</label>
+        <select id="newStatus">
+          <option value="На выдаче">На выдаче</option>
+          <option value="Выдано">Выдано</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Доказательство (текст или ссылка на форум):</label>
+        <input type="text" id="newProof" placeholder="вербовки / ссылка на отчет">
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeAddModal()">Отмена</button>
+        <button class="btn btn-primary" onclick="submitAddAgent()">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toastMessage"></div>
+
+  <script>
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║  1. КОНФИГУРАЦИЯ FIREBASE (Замените значения при необходимости) ║
+    // ╚══════════════════════════════════════════════════════════════════╝
+    const FIREBASE_CONFIG = {
+      apiKey: "ВСТАВЬТЕ_СЮДА_API_KEY",
+      authDomain: "ВСТАВЬТЕ_СЮДА.firebaseapp.com",
+      projectId: "ВСТАВЬТЕ_СЮДА",
+      storageBucket: "ВСТАВЬТЕ_СЮДА.appspot.com",
+      messagingSenderId: "ВСТАВЬТЕ_СЮДА",
+      appId: "ВСТАВЬТЕ_СЮДА"
+    };
+
+    // Список разрешенных почт (клиентская + серверная проверка в firestore.rules)
+    const ALLOWED_ADMIN_EMAILS = [
+      "goponos12@gmail.com"
+      // Добавьте сюда email других лидеров/замов
+    ];
+
+    // Секретный мастер-ключ на случай офлайн/локального доступа
+    const MASTER_KEY = "kiidsg12#$$";
+
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║  2. ИСХОДНЫЕ ДАННЫЕ ИЗ GOOGLE ТАБЛИЦЫ                         ║
+    // ╚══════════════════════════════════════════════════════════════════╝
+    const DEFAULT_DATA = {"fractionrp":[{"id":"2","fullName":"Samuel_Norton (X)","nick":"Samuel_Norton","rank":"X","status":"На выдаче","qty":19,"proof":{"text":"вербовки отчеты","links":[{"text":"вербовки","url":"https://forum.arizona-rp.com/threads/8340346/latest"},{"text":"отчеты","url":"https://forum.arizona-rp.com/threads/11484941/"}]}},{"id":"3","fullName":"Rimuru_Northside (8)","nick":"Rimuru_Northside","rank":"8","status":"Выдано","qty":0,"proof":{"text":"вербовки","links":[{"text":"вербовки","url":"https://forum.arizona-rp.com/threads/8340346/latest"}]}},{"id":"4","fullName":"Gomez_Addams (8)","nick":"Gomez_Addams","rank":"8","status":"На выдаче","qty":2,"proof":{"text":"https://forum.arizona-rp.com/threads/11484941/post-62074505","links":[{"text":"ссылка на пост","url":"https://forum.arizona-rp.com/threads/11484941/post-62074505"}]}},{"id":"5","fullName":"Pablo_Kadurov (8)","nick":"Pablo_Kadurov","rank":"8","status":"Выдано","qty":1,"proof":{"text":"отчёты","links":[{"text":"отчеты","url":"https://forum.arizona-rp.com/threads/11484941/"}]}},{"id":"6","fullName":"Rocket_Exodus (8)","nick":"Rocket_Exodus","rank":"8","status":"Выдано","qty":0,"proof":{"text":"вербовки отчеты","links":[{"text":"вербовки","url":"https://forum.arizona-rp.com/threads/8340346/latest"},{"text":"отчеты","url":"https://forum.arizona-rp.com/threads/11484941/"}]}},{"id":"7","fullName":"Haruki_Yokoyama (8)","nick":"Haruki_Yokoyama","rank":"8","status":"На выдаче","qty":6,"proof":{"text":"отчеты","links":[{"text":"отчеты","url":"https://forum.arizona-rp.com/threads/11484941/"}]}},{"id":"8","fullName":"Billi_Bell (8)","nick":"Billi_Bell","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"9","fullName":"Abram_Alvarez (8)","nick":"Abram_Alvarez","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"10","fullName":"Dante_Carbon (8)","nick":"Dante_Carbon","rank":"8","status":"На выдаче","qty":12,"proof":{"text":"вербовки","links":[{"text":"вербовки","url":"https://forum.arizona-rp.com/threads/8340346/latest"}]}},{"id":"11","fullName":"Takeda_Yamazaki (8)","nick":"Takeda_Yamazaki","rank":"8","status":"На выдаче","qty":14,"proof":{"text":"вербовки","links":[{"text":"вербовки","url":"https://forum.arizona-rp.com/threads/8340346/latest"}]}},{"id":"12","fullName":"Kyle_Rios (7)","nick":"Kyle_Rios","rank":"7","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"13","fullName":"Dan_Winchester (7)","nick":"Dan_Winchester","rank":"7","status":"На выдаче","qty":1,"proof":{"text":"отчеты","links":[{"text":"отчеты","url":"https://forum.arizona-rp.com/threads/11484941/"}]}},{"id":"14","fullName":"Percival_Darkness (7)","nick":"Percival_Darkness","rank":"7","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"15","fullName":"Ezra_Weeknd (7)","nick":"Ezra_Weeknd","rank":"7","status":"На выдаче","qty":9,"proof":{"text":"вербовки","links":[{"text":"вербовки","url":"https://forum.arizona-rp.com/threads/8340346/latest"}]}},{"id":"16","fullName":"Akari_Young (6)","nick":"Akari_Young","rank":"6","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"17","fullName":"Matthew_Bars (6)","nick":"Matthew_Bars","rank":"6","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"18","fullName":"Milena_Steor (5)","nick":"Milena_Steor","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"19","fullName":"Nathan_Rows (5)","nick":"Nathan_Rows","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"20","fullName":"Andrey_Creepton (5)","nick":"Andrey_Creepton","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"21","fullName":"Raymond_Carbon (5)","nick":"Raymond_Carbon","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"22","fullName":"Leonardo_Myrzikov (5)","nick":"Leonardo_Myrzikov","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"23","fullName":"Grant_Williams (5)","nick":"Grant_Williams","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"24","fullName":"Jack_Moren (4)","nick":"Jack_Moren","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"25","fullName":"Fergus_Belford (4)","nick":"Fergus_Belford","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"26","fullName":"Aiden_Morphine (4)","nick":"Aiden_Morphine","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"27","fullName":"Ethan_McCarthy (4)","nick":"Ethan_McCarthy","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"28","fullName":"Jack_Danielss (4)","nick":"Jack_Danielss","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"29","fullName":"Aleks_Patriarkh (4)","nick":"Aleks_Patriarkh","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"30","fullName":"Jacob_Benson (4)","nick":"Jacob_Benson","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"31","fullName":"Charles_Henders (4)","nick":"Charles_Henders","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"32","fullName":"Tyler_Lewise (4)","nick":"Tyler_Lewise","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"33","fullName":"Kiyoshi_Fulgenzi (4)","nick":"Kiyoshi_Fulgenzi","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"34","fullName":"Walter_Fernando (4)","nick":"Walter_Fernando","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"35","fullName":"Aleksandr_Kusainov (4)","nick":"Aleksandr_Kusainov","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"36","fullName":"Takado_Takahashi (4)","nick":"Takado_Takahashi","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"37","fullName":"Roy_Tedesco (4)","nick":"Roy_Tedesco","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"38","fullName":"Pavel_Fiendo (4)","nick":"Pavel_Fiendo","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}}],"praise":[{"id":"2","fullName":"Samuel_Norton (X)","nick":"Samuel_Norton","rank":"X","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"3","fullName":"Rimuru_Northside (8)","nick":"Rimuru_Northside","rank":"8","status":"Выдано","qty":0,"proof":{"text":"не","links":[]}},{"id":"4","fullName":"Gomez_Addams (8)","nick":"Gomez_Addams","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"5","fullName":"Pablo_Kadurov (8)","nick":"Pablo_Kadurov","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"6","fullName":"Rocket_Exodus (8)","nick":"Rocket_Exodus","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"7","fullName":"Haruki_Yokoyama (8)","nick":"Haruki_Yokoyama","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"8","fullName":"Billi_Bell (8)","nick":"Billi_Bell","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"9","fullName":"Dante_Carbon (8)","nick":"Dante_Carbon","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"10","fullName":"Abram_Alvarez (8)","nick":"Abram_Alvarez","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"11","fullName":"Takeda_Yamazaki (8)","nick":"Takeda_Yamazaki","rank":"8","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"12","fullName":"Kyle_Rios (7)","nick":"Kyle_Rios","rank":"7","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"13","fullName":"Dan_Winchester (7)","nick":"Dan_Winchester","rank":"7","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"14","fullName":"Percival_Darkness (7)","nick":"Percival_Darkness","rank":"7","status":"На выдаче","qty":2,"proof":{"text":"[отчет]","links":[{"text":"отчет","url":"https://forum.arizona-rp.com/threads/11369592/latest"}]}},{"id":"15","fullName":"Ezra_Weeknd (7)","nick":"Ezra_Weeknd","rank":"7","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"16","fullName":"Akari_Young (6)","nick":"Akari_Young","rank":"6","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"17","fullName":"Matthew_Bars (6)","nick":"Matthew_Bars","rank":"6","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"18","fullName":"Milena_Steor (5)","nick":"Milena_Steor","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"19","fullName":"Nathan_Rows (5)","nick":"Nathan_Rows","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"20","fullName":"Andrey_Creepton (5)","nick":"Andrey_Creepton","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"21","fullName":"Raymond_Carbon (5)","nick":"Raymond_Carbon","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"22","fullName":"Leonardo_Myrzikov (5)","nick":"Leonardo_Myrzikov","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"23","fullName":"Grant_Williams (5)","nick":"Grant_Williams","rank":"5","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"24","fullName":"Jack_Moren (4)","nick":"Jack_Moren","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"25","fullName":"Fergus_Belford (4)","nick":"Fergus_Belford","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"26","fullName":"Aiden_Morphine (4)","nick":"Aiden_Morphine","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"27","fullName":"Ethan_McCarthy (4)","nick":"Ethan_McCarthy","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"28","fullName":"Jack_Danielss (4)","nick":"Jack_Danielss","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"29","fullName":"Aleks_Patriarkh (4)","nick":"Aleks_Patriarkh","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"30","fullName":"Jacob_Benson (4)","nick":"Jacob_Benson","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"31","fullName":"Charles_Henders (4)","nick":"Charles_Henders","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"32","fullName":"Ksenia_Venge (4)","nick":"Ksenia_Venge","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"33","fullName":"Tyler_Morphine (4)","nick":"Tyler_Morphine","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"34","fullName":"Ian_Wollenberg (4)","nick":"Ian_Wollenberg","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"35","fullName":"Pavel_Fiendo (4)","nick":"Pavel_Fiendo","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}},{"id":"36","fullName":"Tyler_Lewise (4)","nick":"Tyler_Lewise","rank":"4","status":"Выдано","qty":0,"proof":{"text":"","links":[]}}]};
+
+    // State
+    let appData = JSON.parse(JSON.stringify(DEFAULT_DATA));
+    let currentTab = "fractionrp";
+    let currentFilter = "all";
+    let isAdmin = false;
+    let currentUser = null;
+    let isFirebaseReady = false;
+    let db = null;
+    let auth = null;
+
+    // Initialize application
+    function init() {
+      initTheme();
+      setupFirebase();
+      checkKeySession();
+      renderTable();
+      updateBadges();
+    }
+
+    // Theme setup
+    function initTheme() {
+      const savedTheme = localStorage.getItem("az_theme") || "light";
+      document.documentElement.setAttribute("data-theme", savedTheme);
+      updateThemeIcon(savedTheme);
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute("data-theme") || "light";
+      const next = current === "light" ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", next);
+      localStorage.setItem("az_theme", next);
+      updateThemeIcon(next);
+    }
+
+    function updateThemeIcon(theme) {
+      const btn = document.getElementById("themeToggleBtn");
+      btn.innerHTML = theme === "dark" ? "<span>☀️</span>" : "<span>🌙</span>";
+    }
+
+    // Setup Firebase & Firestore Real-time listener
+    function setupFirebase() {
+      const hasConfig = FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith("ВСТАВЬТЕ");
+      
+      if (!hasConfig || typeof firebase === "undefined") {
+        setCloudStatus(false, "Локальный режим (Firebase не настроен)");
+        loadLocalData();
+        return;
+      }
+
+      try {
+        if (!firebase.apps.length) {
+          firebase.initializeApp(FIREBASE_CONFIG);
+        }
+        auth = firebase.auth();
+        db = firebase.firestore();
+        isFirebaseReady = true;
+
+        setCloudStatus(true, "Облако Firebase подключено");
+
+        // Listen for Auth changes
+        auth.onAuthStateChanged(user => {
+          currentUser = user;
+          handleUserAuth(user);
+        });
+
+        // Listen for real-time Firestore updates
+        listenToFirestore();
+
+      } catch (err) {
+        console.warn("Firebase init error, fallback to local:", err);
+        setCloudStatus(false, "Ошибка облака (Локальный режим)");
+        loadLocalData();
+      }
+    }
+
+    function setCloudStatus(isOnline, text) {
+      const dot = document.getElementById("cloudDot");
+      const label = document.getElementById("cloudStatusText");
+      dot.className = "status-dot " + (isOnline ? "dot-green" : "dot-yellow");
+      label.textContent = text;
+    }
+
+    function listenToFirestore() {
+      if (!db) return;
+      ["fractionrp", "praise"].forEach(tab => {
+        db.collection("sheets").doc(tab).onSnapshot(doc => {
+          if (doc.exists) {
+            const data = doc.data();
+            if (data && Array.isArray(data.rows)) {
+              appData[tab] = data.rows;
+              renderTable();
+              updateBadges();
+            }
+          }
+        }, err => {
+          console.warn("Firestore snapshot error on " + tab + ":", err);
+        });
+      });
+    }
+
+    // Check user auth & permissions
+    function handleUserAuth(user) {
+      if (user) {
+        const email = (user.email || "").toLowerCase();
+        const isEmailAllowed = ALLOWED_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(email);
+
+        if (isEmailAllowed) {
+          setAdminState(true, `Администратор: ${email}`);
+        } else {
+          setAdminState(false, null);
+          showToast(`Вход выполнен (${email}), но почты нет в списке администраторов`);
+        }
+        renderAuthUI(user);
+      } else {
+        // check if unlocked via secret key
+        checkKeySession();
+      }
+    }
+
+    function checkKeySession() {
+      const keySaved = sessionStorage.getItem("az_admin_key_unlocked");
+      if (keySaved === "true") {
+        setAdminState(true, "Доступ по ключу лидера");
+        renderAuthUI({ displayName: "Ключ лидера" });
+      } else if (!currentUser) {
+        setAdminState(false, null);
+        renderAuthUI(null);
+      }
+    }
+
+    function setAdminState(admin, label) {
+      isAdmin = admin;
+      document.body.classList.toggle("is-admin", admin);
+
+      const banner = document.getElementById("modeBanner");
+      const bannerText = document.getElementById("bannerText");
+      const badge = document.getElementById("adminEmailBadge");
+
+      if (admin) {
+        banner.className = "mode-banner admin";
+        bannerText.innerHTML = `✏️ <strong>Режим редактирования активен.</strong> Вы можете изменять счет [+]/[-] и выдавать похвалу.`;
+        badge.textContent = label || "Админ";
+      } else {
+        banner.className = "mode-banner readonly";
+        bannerText.innerHTML = `👁️ <strong>Режим просмотра:</strong> вы можете искать игроков и копировать команды. Для изменения отметок (+ / -) требуется авторизация администратора.`;
+        badge.textContent = "";
+      }
+      renderTable();
+    }
+
+    function renderAuthUI(user) {
+      const container = document.getElementById("authContainer");
+      if (user) {
+        const title = user.email || user.displayName || "Админ";
+        container.innerHTML = `
+          <button class="btn btn-outline" onclick="logout()" title="Выйти из аккаунта">
+            <span>👤</span> ${escapeHtml(title)} (Выйти)
+          </button>
+        `;
+      } else {
+        container.innerHTML = `
+          <button class="btn btn-outline" id="loginBtn" onclick="openAuthModal()">
+            <span>🔐</span> Войти / Доступ
+          </button>
+        `;
+      }
+    }
+
+    // Save Data (to Firestore if online, otherwise localStorage)
+    function persistData() {
+      if (isFirebaseReady && db && isAdmin) {
+        db.collection("sheets").doc(currentTab).set({
+          rows: appData[currentTab],
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }).catch(err => {
+          console.error("Firestore write failed:", err);
+          showToast("Ошибка записи в облако: " + err.message);
+        });
+      } else {
+        localStorage.setItem("az_table_data_" + currentTab, JSON.stringify(appData[currentTab]));
+      }
+      updateBadges();
+    }
+
+    function loadLocalData() {
+      ["fractionrp", "praise"].forEach(tab => {
+        const saved = localStorage.getItem("az_table_data_" + tab);
+        if (saved) {
+          try {
+            appData[tab] = JSON.parse(saved);
+          } catch(e) {}
+        }
+      });
+      renderTable();
+      updateBadges();
+    }
+
+    // Initialize Firestore with default Google Sheets data (Admin only)
+    function initFirestoreFromDefaults() {
+      if (!isFirebaseReady || !db) {
+        alert("Firebase не настроен! См. инструкцию SETUP.md");
+        return;
+      }
+      if (!isAdmin) {
+        alert("Только администратор может загрузить данные!");
+        return;
+      }
+      if (!confirm("Загрузить начальные данные из Google Таблицы в облако Firebase?")) return;
+
+      Promise.all([
+        db.collection("sheets").doc("fractionrp").set({ rows: DEFAULT_DATA.fractionrp }),
+        db.collection("sheets").doc("praise").set({ rows: DEFAULT_DATA.praise }),
+        db.collection("config").doc("admins").set({ emails: ALLOWED_ADMIN_EMAILS })
+      ]).then(() => {
+        showToast("Данные успешно загружены в облако Firebase!");
+      }).catch(err => {
+        alert("Ошибка загрузки: " + err.message);
+      });
+    }
+
+    // Switch Tabs
+    function switchTab(tabName) {
+      currentTab = tabName;
+      document.querySelectorAll(".gs-tab").forEach(t => t.classList.remove("active"));
+      document.getElementById(tabName === "fractionrp" ? "tabFractionrp" : "tabPraise").classList.add("active");
+      renderTable();
+    }
+
+    function setFilter(type, el) {
+      currentFilter = type;
+      document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+      el.classList.add("active");
+      renderTable();
+    }
+
+    // Render Table Rows
+    function renderTable() {
+      const tbody = document.getElementById("tableBody");
+      tbody.innerHTML = "";
+
+      const rows = appData[currentTab] || [];
+      const searchQuery = (document.getElementById("searchInput").value || "").trim().toLowerCase();
+      const rankFilter = document.getElementById("rankFilter").value;
+
+      let pendingCount = 0;
+      let totalQty = 0;
+      let visibleCount = 0;
+
+      rows.forEach((row, index) => {
+        const isPending = row.status === "На выдаче" || (row.qty > 0 && row.status !== "Выдано");
+        if (isPending) pendingCount++;
+        totalQty += (row.qty || 0);
+
+        if (currentFilter === "pending" && !isPending) return;
+        if (currentFilter === "issued" && isPending) return;
+        if (rankFilter !== "all" && row.rank !== rankFilter) return;
+
+        if (searchQuery) {
+          const matchNick = row.fullName.toLowerCase().includes(searchQuery);
+          const matchProof = (row.proof && row.proof.text ? row.proof.text.toLowerCase() : "").includes(searchQuery);
+          if (!matchNick && !matchProof) return;
+        }
+
+        visibleCount++;
+
+        const tr = document.createElement("tr");
+
+        const command = currentTab === "fractionrp"
+          ? `/fractionrp ${row.nick} ${row.qty > 0 ? row.qty : 1}`
+          : (row.qty > 1 ? `/praise ${row.nick} ${row.qty}` : `/praise ${row.nick}`);
+
+        let proofHtml = '<span style="color: var(--text-muted);">-</span>';
+        if (row.proof) {
+          const links = row.proof.links || [];
+          if (links.length > 0) {
+            proofHtml = links.map(l => `<a href="${l.url}" target="_blank" class="proof-link">${l.text}</a>`).join(' ');
+          } else if (row.proof.text) {
+            if (row.proof.text.startsWith('http')) {
+              proofHtml = `<a href="${row.proof.text}" target="_blank" class="proof-link">ссылка</a>`;
+            } else {
+              proofHtml = `<span>${escapeHtml(row.proof.text)}</span>`;
+            }
+          }
+        }
+
+        const statusClass = row.status === "На выдаче" ? "status-pending" : "status-issued";
+
+        // Controls HTML (Active if admin, read-only if viewer)
+        let qtyControlHtml = '';
+        if (isAdmin) {
+          qtyControlHtml = `
+            <div class="qty-control">
+              <button class="btn-qty btn-minus" onclick="changeQty(${index}, -1)" title="Убавить (-1)">−</button>
+              <input type="number" class="qty-input" value="${row.qty}" min="0" onchange="setQty(${index}, this.value)">
+              <button class="btn-qty btn-plus" onclick="changeQty(${index}, 1)" title="Добавить (+1)">+</button>
+              <button class="btn-mini" onclick="changeQty(${index}, 5)" title="+5 к счету">+5</button>
+              <button class="btn-mini" onclick="resetRowQty(${index})" title="Обнулить">0</button>
+            </div>
+          `;
+        } else {
+          qtyControlHtml = `
+            <div class="qty-control">
+              <span style="font-size: 15px; font-weight: bold; min-width: 40px; text-align: center;">${row.qty}</span>
+            </div>
+          `;
+        }
+
+        let statusClickAttr = isAdmin ? `onclick="toggleRowStatus(${index})" title="Нажмите для смены статуса"` : '';
+        let editableClass = isAdmin ? 'editable' : '';
+
+        let actionsColHtml = isAdmin ? `
+          <td class="col-actions admin-only-cell admin-only">
+            <button class="btn-icon" onclick="deleteRow(${index})" title="Удалить">🗑️</button>
+          </td>
+        ` : '';
+
+        tr.innerHTML = `
+          <td class="cell-num">${index + 1}</td>
+          <td class="col-agent">
+            <div class="agent-cell">
+              <span class="agent-name">${escapeHtml(row.nick)}</span>
+              ${row.rank ? `<span class="agent-rank">Ранг: ${escapeHtml(row.rank)}</span>` : ''}
+            </div>
+          </td>
+          <td class="col-status" style="text-align: center;">
+            <div class="status-badge ${statusClass} ${editableClass}" ${statusClickAttr}>
+              ${escapeHtml(row.status || 'Выдано')}
+            </div>
+          </td>
+          <td class="col-qty">
+            ${qtyControlHtml}
+          </td>
+          <td class="col-command">
+            <div class="command-box">
+              <span class="cmd-text">${escapeHtml(command)}</span>
+              <button class="cmd-copy-btn" onclick="copyCommand('${escapeHtml(command)}')" title="Скопировать">
+                📋 Копировать
+              </button>
+              ${isAdmin ? `
+                <button class="cmd-done-btn" onclick="issueCommand(${index}, '${escapeHtml(command)}')" title="Скопировать и отметить как выдано">
+                  ✓ Выдать
+                </button>
+              ` : ''}
+            </div>
+          </td>
+          <td class="col-proof">
+            <div class="proof-links">${proofHtml}</div>
+          </td>
+          ${actionsColHtml}
+        `;
+
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById("statsText").innerHTML =
+        `Показано: <strong>${visibleCount}</strong> | На выдаче: <strong style="color: #1a73e8">${pendingCount}</strong> | Отметок: <strong>${totalQty}</strong>`;
+    }
+
+    // Quantity Handlers (Admin Only)
+    function changeQty(index, delta) {
+      if (!isAdmin) return;
+      const rows = appData[currentTab];
+      if (!rows || !rows[index]) return;
+
+      let newQty = (rows[index].qty || 0) + delta;
+      if (newQty < 0) newQty = 0;
+      rows[index].qty = newQty;
+
+      if (delta > 0 && newQty > 0) {
+        rows[index].status = "На выдаче";
+      } else if (newQty === 0) {
+        rows[index].status = "Выдано";
+      }
+
+      persistData();
+      renderTable();
+    }
+
+    function setQty(index, val) {
+      if (!isAdmin) return;
+      const rows = appData[currentTab];
+      if (!rows || !rows[index]) return;
+
+      let v = parseInt(val, 10);
+      if (isNaN(v) || v < 0) v = 0;
+      rows[index].qty = v;
+      rows[index].status = v > 0 ? "На выдаче" : "Выдано";
+
+      persistData();
+      renderTable();
+    }
+
+    function resetRowQty(index) {
+      if (!isAdmin) return;
+      const rows = appData[currentTab];
+      if (!rows || !rows[index]) return;
+      rows[index].qty = 0;
+      rows[index].status = "Выдано";
+      persistData();
+      renderTable();
+      showToast(`Счет ${rows[index].nick} обнулен`);
+    }
+
+    function toggleRowStatus(index) {
+      if (!isAdmin) return;
+      const rows = appData[currentTab];
+      if (!rows || !rows[index]) return;
+
+      if (rows[index].status === "На выдаче") {
+        rows[index].status = "Выдано";
+      } else {
+        rows[index].status = "На выдаче";
+        if (rows[index].qty === 0) rows[index].qty = 1;
+      }
+      persistData();
+      renderTable();
+    }
+
+    function copyCommand(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast("Скопировано: " + text);
+      }).catch(() => {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        showToast("Скопировано: " + text);
+      });
+    }
+
+    function issueCommand(index, command) {
+      if (!isAdmin) return;
+      copyCommand(command);
+      const rows = appData[currentTab];
+      if (rows && rows[index]) {
+        rows[index].qty = 0;
+        rows[index].status = "Выдано";
+        persistData();
+        renderTable();
+        showToast(`Выдано игроку ${rows[index].nick}! Команда скопирована.`);
+      }
+    }
+
+    function markAllFilteredAsIssued() {
+      if (!isAdmin) return;
+      const rows = appData[currentTab] || [];
+      const pending = rows.filter(r => r.status === "На выдаче" || r.qty > 0);
+      if (pending.length === 0) {
+        showToast("Нет игроков со статусом «На выдаче»");
+        return;
+      }
+      if (!confirm(`Отметить ВСЕХ (${pending.length} игроков) как «Выдано»?`)) return;
+
+      rows.forEach(r => {
+        if (r.status === "На выдаче" || r.qty > 0) {
+          r.qty = 0;
+          r.status = "Выдано";
+        }
+      });
+      persistData();
+      renderTable();
+      showToast("Все игроки отмечены как «Выдано»!");
+    }
+
+    function updateBadges() {
+      const fPending = (appData["fractionrp"] || []).filter(r => r.status === "На выдаче" || r.qty > 0).length;
+      const pPending = (appData["praise"] || []).filter(r => r.status === "На выдаче" || r.qty > 0).length;
+
+      const fb = document.getElementById("badgeFractionrp");
+      const pb = document.getElementById("badgePraise");
+
+      fb.textContent = fPending;
+      fb.style.display = fPending > 0 ? "inline-block" : "none";
+
+      pb.textContent = pPending;
+      pb.style.display = pPending > 0 ? "inline-block" : "none";
+    }
+
+    function deleteRow(index) {
+      if (!isAdmin) return;
+      const rows = appData[currentTab];
+      if (!rows || !rows[index]) return;
+      if (confirm(`Удалить ${rows[index].fullName}?`)) {
+        rows.splice(index, 1);
+        persistData();
+        renderTable();
+        showToast("Удалено");
+      }
+    }
+
+    // Export
+    function exportData() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appData, null, 2));
+      const a = document.createElement("a");
+      a.href = dataStr;
+      a.download = `Таблица_выдачи_${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showToast("Файл сохранен!");
+    }
+
+    // Auth Modals & Actions
+    function openAuthModal() {
+      document.getElementById("authModal").style.display = "flex";
+    }
+
+    function closeAuthModal() {
+      document.getElementById("authModal").style.display = "none";
+    }
+
+    function switchAuthTab(tab) {
+      document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
+      document.getElementById("authGooglePane").style.display = tab === "google" ? "block" : "none";
+      document.getElementById("authKeyPane").style.display = tab === "key" ? "block" : "none";
+      document.getElementById("authEmailPane").style.display = tab === "email" ? "block" : "none";
+
+      if (tab === "google") document.getElementById("tabGoogleBtn").classList.add("active");
+      if (tab === "key") document.getElementById("tabKeyBtn").classList.add("active");
+      if (tab === "email") document.getElementById("tabEmailBtn").classList.add("active");
+    }
+
+    // 1-Click Google Sign-In
+    function loginWithGoogle() {
+      if (!auth) {
+        alert("Firebase не подключен. Воспользуйтесь вкладкой «Секретный ключ».");
+        return;
+      }
+      const provider = new firebase.auth.GoogleAuthProvider();
+      auth.signInWithPopup(provider).then(res => {
+        closeAuthModal();
+        showToast("Вход выполнен: " + res.user.email);
+      }).catch(err => {
+        alert("Ошибка входа Google: " + err.message);
+      });
+    }
+
+    // Email / Password Login
+    function loginWithEmail() {
+      if (!auth) {
+        alert("Firebase не подключен.");
+        return;
+      }
+      const email = document.getElementById("authEmail").value.trim();
+      const pass = document.getElementById("authPassword").value;
+      if (!email || !pass) return alert("Введите email и пароль!");
+
+      auth.signInWithEmailAndPassword(email, pass).then(res => {
+        closeAuthModal();
+        showToast("Успешный вход: " + res.user.email);
+      }).catch(err => {
+        alert("Ошибка входа: " + err.message);
+      });
+    }
+
+    // Secret Key System
+    function verifyAccessKey() {
+      const key = document.getElementById("secretKeyInput").value.trim();
+      if (key === MASTER_KEY) {
+        sessionStorage.setItem("az_admin_key_unlocked", "true");
+        setAdminState(true, "Доступ по ключу лидера");
+        renderAuthUI({ displayName: "Ключ лидера" });
+        closeAuthModal();
+        showToast("Доступ администратора активирован!");
+      } else {
+        alert("Неверный ключ доступа!");
+      }
+    }
+
+    function logout() {
+      sessionStorage.removeItem("az_admin_key_unlocked");
+      if (auth && currentUser) {
+        auth.signOut();
+      }
+      setAdminState(false, null);
+      renderAuthUI(null);
+      showToast("Вы вышли из системы");
+    }
+
+    // Add Agent Modal
+    function openAddModal() {
+      if (!isAdmin) return;
+      document.getElementById("newNick").value = "";
+      document.getElementById("newRank").value = "8";
+      document.getElementById("newQty").value = "1";
+      document.getElementById("newProof").value = "";
+      document.getElementById("addModal").style.display = "flex";
+      document.getElementById("newNick").focus();
+    }
+
+    function closeAddModal() {
+      document.getElementById("addModal").style.display = "none";
+    }
+
+    function submitAddAgent() {
+      if (!isAdmin) return;
+      const nick = document.getElementById("newNick").value.trim();
+      const rank = document.getElementById("newRank").value.trim();
+      const qty = parseInt(document.getElementById("newQty").value, 10) || 0;
+      const status = document.getElementById("newStatus").value;
+      const proofText = document.getElementById("newProof").value.trim();
+
+      if (!nick) return alert("Введите никнейм!");
+
+      const fullName = rank ? `${nick} (${rank})` : nick;
+      const newRow = {
+        id: String(Date.now()),
+        fullName: fullName,
+        nick: nick,
+        rank: rank,
+        status: status,
+        qty: qty,
+        proof: {
+          text: proofText,
+          links: proofText.startsWith("http") ? [{ text: "ссылка", url: proofText }] : []
+        }
+      };
+
+      appData[currentTab].unshift(newRow);
+      persistData();
+      renderTable();
+      closeAddModal();
+      showToast(`Агент ${fullName} добавлен!`);
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const t = document.getElementById("toastMessage");
+      t.textContent = msg;
+      t.classList.add("show");
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove("show"), 3000);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    // Run
+    init();
+  </script>
+</body>
+</html>
