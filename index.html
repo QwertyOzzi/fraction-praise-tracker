@@ -949,8 +949,10 @@
             <span>${escapeHtml(email)}</span>
             ${isOwner ? '<span style="font-size: 10px; background: #e8f0fe; color: #1a73e8; padding: 1px 5px; border-radius: 4px; font-weight: 600;">Владелец</span>' : ''}
           </div>
-          ${!isOwner ? `<button class="btn-icon" onclick="removeAdminEmail('${escapeHtml(email)}')" title="Отозвать права">✕</button>` : ''}
+          ${!isOwner ? `<button class="btn-icon" data-action="remove-admin-email" title="Отозвать права">✕</button>` : ''}
         `;
+        const revokeBtn = row.querySelector('[data-action="remove-admin-email"]');
+        if (revokeBtn) revokeBtn.addEventListener("click", () => removeAdminEmail(email));
         container.appendChild(row);
       });
     }
@@ -1418,11 +1420,11 @@
           <td class="col-command">
             <div class="command-box">
               <span class="cmd-text">${escapeHtml(command)}</span>
-              <button class="cmd-copy-btn" onclick="copyCommand('${escapeHtml(command)}')" title="Скопировать">
+              <button class="cmd-copy-btn" data-action="copy-command" title="Скопировать">
                 📋 Копировать
               </button>
               ${isAdmin ? `
-                <button class="cmd-done-btn" onclick="issueCommand(${index}, '${escapeHtml(command)}')" title="Скопировать команду и убавить 1 отметку (-1)">
+                <button class="cmd-done-btn" data-action="issue-command" title="Скопировать команду и убавить 1 отметку (-1)">
                   ✓ Выдать 1
                 </button>
               ` : ''}
@@ -1434,6 +1436,10 @@
           ${actionsColHtml}
         `;
 
+        const copyBtn = tr.querySelector('[data-action="copy-command"]');
+        if (copyBtn) copyBtn.addEventListener("click", () => copyCommand(command));
+        const issueBtn = tr.querySelector('[data-action="issue-command"]');
+        if (issueBtn) issueBtn.addEventListener("click", () => issueCommand(index, command));
         tbody.appendChild(tr);
       });
 
@@ -1717,6 +1723,13 @@
       return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     }
 
+    function safeExternalUrl(value) {
+      try {
+        const link = new URL(String(value || "").trim());
+        return (link.protocol === "https:" || link.protocol === "http:") ? link.href : null;
+      } catch (_) { return null; }
+    }
+
     // ╔══════════════════════════════════════════════════════════════════╗
     // ║  СЛУЖБА ПОДДЕРЖКИ И БАГ-ТРЕКЕР                                  ║
     // ╚══════════════════════════════════════════════════════════════════╝
@@ -1756,6 +1769,8 @@
 
       if (!nick) return alert("Пожалуйста, укажите ваш никнейм!");
       if (!desc) return alert("Пожалуйста, опишите проблему или баг!");
+      if (nick.length > 80 || contact.length > 200 || category.length > 80 || desc.length > 4000 || screenshot.length > 1000) return alert("Превышена допустимая длина поля.");
+      if (screenshot && !safeExternalUrl(screenshot)) return alert("Ссылка должна начинаться с https:// или http://");
 
       const ticketData = {
         nick: nick,
@@ -1915,7 +1930,7 @@
             </div>
           </div>
           <div style="font-size: 12.5px; margin-top: 5px; line-height: 1.45; white-space: pre-wrap;">${escapeHtml(t.description || "")}</div>
-          ${t.screenshot ? `<div style="margin-top: 6px;"><a href="${escapeHtml(t.screenshot)}" target="_blank" class="proof-link" style="font-size: 11.5px;">🔗 Скриншот проблемы</a></div>` : ""}
+          ${safeExternalUrl(t.screenshot) ? `<div style="margin-top: 6px;"><a href="${escapeHtml(safeExternalUrl(t.screenshot))}" target="_blank" class="proof-link" rel="noopener noreferrer" style="font-size: 11.5px;">🔗 Скриншот проблемы</a></div>` : ""}
           ${isAdmin && t.id && t.status !== "Решено" ? `
             <div style="display: flex; gap: 6px; margin-top: 8px;">
               ${t.status !== "В работе" ? `<button class="btn btn-mini" onclick="updateTicketStatus('${t.id}', 'В работе')">🟡 В работу</button>` : ""}
@@ -2133,8 +2148,10 @@
             <strong>${escapeHtml(email)}</strong>
             ${isOwner ? '<span style="font-size:10px; background:#f3e8ff; color:#7c3aed; padding:1px 6px; border-radius:10px; margin-left:6px; font-weight:600;">Тех. Админ</span>' : '<span style="font-size:10px; background:#e8f0fe; color:#1a73e8; padding:1px 6px; border-radius:10px; margin-left:6px;">Администратор</span>'}
           </div>
-          ${!isOwner ? `<button class="btn btn-mini" style="color:#ef4444;" onclick="removeAdminEmail('${escapeHtml(email)}')">Удалить</button>` : ''}
+          ${!isOwner ? `<button class="btn btn-mini" style="color:#ef4444;" data-action="remove-admin-email">Удалить</button>` : ''}
         `;
+        const revokeBtn = item.querySelector('[data-action="remove-admin-email"]');
+        if (revokeBtn) revokeBtn.addEventListener("click", () => removeAdminEmail(email));
         container.appendChild(item);
       });
     }
