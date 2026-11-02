@@ -987,8 +987,8 @@
         const tr = document.createElement("tr");
 
         const command = currentTab === "fractionrp"
-          ? `/fractionrp ${row.nick} ${row.qty > 0 ? row.qty : 1}`
-          : (row.qty > 1 ? `/praise ${row.nick} ${row.qty}` : `/praise ${row.nick}`);
+          ? `/fractionrp ${row.nick}`
+          : `/praise ${row.nick}`;
 
         let proofHtml = '<span style="color: var(--text-muted);">-</span>';
         if (row.proof) {
@@ -1058,8 +1058,8 @@
                 📋 Копировать
               </button>
               ${isAdmin ? `
-                <button class="cmd-done-btn" onclick="issueCommand(${index}, '${escapeHtml(command)}')" title="Скопировать и отметить как выдано">
-                  ✓ Выдать
+                <button class="cmd-done-btn" onclick="issueCommand(${index}, '${escapeHtml(command)}')" title="Скопировать команду и убавить 1 отметку (-1)">
+                  ✓ Выдать 1
                 </button>
               ` : ''}
             </div>
@@ -1156,11 +1156,18 @@
       copyCommand(command);
       const rows = appData[currentTab];
       if (rows && rows[index]) {
-        rows[index].qty = 0;
-        rows[index].status = "Выдано";
+        const curQty = rows[index].qty || 0;
+        const newQty = Math.max(0, curQty - 1);
+        rows[index].qty = newQty;
+        if (newQty === 0) {
+          rows[index].status = "Выдано";
+          showToast(`Выдано игроку ${rows[index].nick}! Все баллы выданы.`);
+        } else {
+          rows[index].status = "На выдаче";
+          showToast(`Выдано 1 для ${rows[index].nick}! Осталось: ${newQty}`);
+        }
         persistData();
         renderTable();
-        showToast(`Выдано игроку ${rows[index].nick}! Команда скопирована.`);
       }
     }
 
