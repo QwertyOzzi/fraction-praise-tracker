@@ -31,6 +31,12 @@ service cloud.firestore {
       allow write: if isOwner();
     }
 
+    // Служба поддержки и баг-репорты: любой пользователь может отправить, админы могут модерировать
+    match /support_tickets/{ticketId} {
+      allow read, create: if true;
+      allow update, delete: if isAdmin();
+    }
+
     match /{document=**} {
       allow read: if true;
       allow write: if isOwner();

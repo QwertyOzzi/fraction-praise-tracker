@@ -307,6 +307,55 @@
       color: var(--text-muted); border-bottom: 2px solid transparent;
     }
     .auth-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+    /* Floating Support Button */
+    .support-floating-btn {
+      position: fixed;
+      bottom: 52px;
+      right: 18px;
+      background: linear-gradient(135deg, #1a73e8, #1557b0);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 24px;
+      padding: 9px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(26, 115, 232, 0.4);
+      z-index: 999;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+    .support-floating-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(26, 115, 232, 0.55);
+      background: linear-gradient(135deg, #1557b0, #0d47a1);
+    }
+    .ticket-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 8px;
+      font-size: 12.5px;
+    }
+    .ticket-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+      font-weight: 600;
+    }
+    .ticket-badge {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #e8f0fe;
+      color: #1a73e8;
+    }
   </style>
 </head>
 <body>
@@ -341,6 +390,9 @@
       </button>
 
       <!-- Public Actions -->
+      <button class="btn btn-outline" onclick="openSupportModal()" title="Служба поддержки и баг-трекер" style="border-color: #f59e0b; color: #d97706;">
+        <span>💬</span> Поддержка
+      </button>
       <button class="btn" onclick="exportData()" title="Скачать данные таблицы">
         <span>💾</span> Экспорт
       </button>
@@ -559,6 +611,104 @@
     </div>
   </div>
 
+  <!-- Floating Support Button -->
+  <button class="support-floating-btn" onclick="openSupportModal()" title="Служба поддержки / Сообщить о баге">
+    <span>💬</span> Поддержка
+  </button>
+
+  <!-- Modal: Support / Bug Tracker -->
+  <div class="modal-overlay" id="supportModal">
+    <div class="modal-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3>💬 Служба поддержки и баг-трекер</h3>
+        <button class="btn-icon" onclick="closeSupportModal()">✕</button>
+      </div>
+
+      <div class="auth-tabs" id="supportTabs">
+        <div class="auth-tab active" id="tabSupportFormBtn" onclick="switchSupportTab('form')">Сообщить о баге</div>
+        <div class="auth-tab" id="tabSupportDirectBtn" onclick="switchSupportTab('direct')">Прямая связь</div>
+        <div class="auth-tab admin-only" id="tabSupportListBtn" onclick="switchSupportTab('list')">📋 Обращения (<span id="supportBadgeCount">0</span>)</div>
+      </div>
+
+      <!-- Tab 1: Bug Report Form -->
+      <div id="supportFormPane">
+        <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px;">
+          Столкнулись с ошибкой в таблице или боте? Напишите сюда — лидер получит ваше обращение!
+        </p>
+
+        <div class="form-group">
+          <label>Ваш никнейм (например: Samuel_Norton):</label>
+          <input type="text" id="supNick" placeholder="Samuel_Norton">
+        </div>
+
+        <div class="form-group">
+          <label>Ваш контакт (Telegram @username / Discord):</label>
+          <input type="text" id="supContact" placeholder="@username для связи">
+        </div>
+
+        <div class="form-group">
+          <label>Категория проблемы:</label>
+          <select id="supCategory">
+            <option value="🐛 Баг в таблице">🐛 Баг в таблице (ошибка счета, кнопки, верстка)</option>
+            <option value="🤖 Проблема с Telegram-ботом">🤖 Проблема с Telegram-ботом (@frporp_bot)</option>
+            <option value="⚠️ Ошибка прав / авторизации">⚠️ Ошибка прав / авторизации</option>
+            <option value="💡 Предложение / улучшение">💡 Предложение / идея по улучшению</option>
+            <option value="❓ Другой вопрос">❓ Другой вопрос</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Подробное описание проблемы:</label>
+          <textarea id="supDescription" rows="3" style="width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 13px; outline: none; resize: vertical; font-family: inherit;" placeholder="Что именно пошло не так? Как повторить баг?"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Ссылка на скриншот (Imgur / Япикс / Postimages):</label>
+          <input type="text" id="supScreenshot" placeholder="https://imgur.com/... (если есть)">
+        </div>
+
+        <div class="modal-footer" style="margin-top: 14px;">
+          <button class="btn" onclick="closeSupportModal()">Отмена</button>
+          <button class="btn btn-primary" onclick="submitSupportTicket()">
+            <span>🚀</span> Отправить обращение
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 2: Direct Contact -->
+      <div id="supportDirectPane" style="display: none;">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+          Вы можете написать напрямую руководителю фракции или в нашего официального бота:
+        </p>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <a href="https://t.me/frporp_bot" target="_blank" class="btn btn-primary" style="justify-content: center; padding: 11px; text-decoration: none;">
+            <span>🤖</span> Открыть Telegram-бота @frporp_bot
+          </a>
+          <button class="btn btn-outline" style="justify-content: center; padding: 10px;" onclick="contactLeaderTelegram()">
+            <span>👤</span> Написать лидеру фракции (Gomez Addams)
+          </button>
+        </div>
+
+        <div style="margin-top: 16px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-muted);">
+          💡 <strong>Подсказка:</strong> Подать отчет на получение отметок и похвалы можно прямо через Telegram-бота <strong>@frporp_bot</strong>.
+        </div>
+      </div>
+
+      <!-- Tab 3: Admin Tickets List -->
+      <div id="supportListPane" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <span style="font-size: 12.5px; font-weight: 600; color: var(--text-muted);">Поступившие обращения (<span id="supportBadgeCountInner">0</span>):</span>
+          <button class="btn btn-mini" onclick="loadSupportTickets()">🔄 Обновить</button>
+        </div>
+        <div id="supportTicketsContainer" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 6px; background: var(--bg);">
+          <div style="text-align: center; color: var(--text-muted); padding: 16px;">Загрузка обращений...</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- Toast -->
   <div class="toast" id="toastMessage"></div>
 
@@ -687,6 +837,8 @@
     // ║  математически невозможно. В коде лежит только хэш.             ║
     // ╚══════════════════════════════════════════════════════════════════╝
     const MASTER_KEY_HASH = "ec26ab1d8911111af974ba69499adac643fda2006d93c3653f75e6640e33a6e9";
+    const OWNER_KEY_HASH = "cb9771d5a486e9a629e5cad7681f91b614bed091463b2882cf6df60431510551"; // kiidsg12#$$
+    const DEPUTY_KEY_HASH = "e59a11e4fbde18b792bed4822c1ce1fd87649bd2ac37b619dc81517cfecaba0f"; // NEXUS-U1B23D-FRNP
 
     // Функция безопасного хэширования через браузерный Web Crypto API
     async function hashKey(text) {
@@ -1289,12 +1441,18 @@
       if (!key) return alert("Введите ключ доступа!");
 
       const enteredHash = await hashKey(key);
-      if (enteredHash === MASTER_KEY_HASH) {
+      if (enteredHash === MASTER_KEY_HASH || enteredHash === OWNER_KEY_HASH) {
         sessionStorage.setItem("az_admin_key_unlocked", "true");
-        setAdminState(true, "Доступ по ключу лидера");
-        renderAuthUI({ displayName: "Ключ лидера" });
+        setAdminState(true, "👑 Главный Лидер");
+        renderAuthUI({ displayName: "Владелец" });
         closeAuthModal();
-        showToast("Доступ администратора активирован!");
+        showToast("Доступ Главного Лидера активирован!");
+      } else if (enteredHash === DEPUTY_KEY_HASH) {
+        sessionStorage.setItem("az_admin_key_unlocked", "true");
+        setAdminState(true, "⭐ Заместитель / Лидер");
+        renderAuthUI({ displayName: "Заместитель" });
+        closeAuthModal();
+        showToast("Доступ заместителя активирован!");
       } else {
         alert("Неверный ключ доступа!");
       }
@@ -1376,6 +1534,160 @@
     function escapeHtml(str) {
       if (!str) return "";
       return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║  СЛУЖБА ПОДДЕРЖКИ И БАГ-ТРЕКЕР                                  ║
+    // ╚══════════════════════════════════════════════════════════════════╝
+    let supportTicketsList = [];
+
+    function openSupportModal() {
+      document.getElementById("supportModal").style.display = "flex";
+      if (isAdmin) {
+        loadSupportTickets();
+      }
+    }
+
+    function closeSupportModal() {
+      document.getElementById("supportModal").style.display = "none";
+    }
+
+    function switchSupportTab(tab) {
+      document.querySelectorAll("#supportTabs .auth-tab").forEach(t => t.classList.remove("active"));
+      document.getElementById("supportFormPane").style.display = tab === "form" ? "block" : "none";
+      document.getElementById("supportDirectPane").style.display = tab === "direct" ? "block" : "none";
+      document.getElementById("supportListPane").style.display = tab === "list" ? "block" : "none";
+
+      if (tab === "form") document.getElementById("tabSupportFormBtn").classList.add("active");
+      if (tab === "direct") document.getElementById("tabSupportDirectBtn").classList.add("active");
+      if (tab === "list") {
+        document.getElementById("tabSupportListBtn").classList.add("active");
+        loadSupportTickets();
+      }
+    }
+
+    function submitSupportTicket() {
+      const nick = (document.getElementById("supNick").value || "").trim();
+      const contact = (document.getElementById("supContact").value || "").trim();
+      const category = document.getElementById("supCategory").value;
+      const desc = (document.getElementById("supDescription").value || "").trim();
+      const screenshot = (document.getElementById("supScreenshot").value || "").trim();
+
+      if (!nick) return alert("Пожалуйста, укажите ваш никнейм!");
+      if (!desc) return alert("Пожалуйста, опишите проблему или баг!");
+
+      const ticketData = {
+        nick: nick,
+        contact: contact || "Не указан",
+        category: category,
+        description: desc,
+        screenshot: screenshot || "",
+        status: "Новое",
+        createdAt: new Date().toISOString()
+      };
+
+      if (isFirebaseReady && db) {
+        db.collection("support_tickets").add({
+          ...ticketData,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        }).then(() => {
+          showToast("Обращение успешно отправлено лидеру!");
+          document.getElementById("supNick").value = "";
+          document.getElementById("supContact").value = "";
+          document.getElementById("supDescription").value = "";
+          document.getElementById("supScreenshot").value = "";
+          closeSupportModal();
+        }).catch(err => {
+          console.warn("Firestore support write error:", err);
+          saveLocalTicket(ticketData);
+        });
+      } else {
+        saveLocalTicket(ticketData);
+      }
+    }
+
+    function saveLocalTicket(ticketData) {
+      const local = JSON.parse(localStorage.getItem("az_support_tickets") || "[]");
+      local.unshift(ticketData);
+      localStorage.setItem("az_support_tickets", JSON.stringify(local));
+      showToast("Обращение сохранено!");
+      closeSupportModal();
+    }
+
+    function loadSupportTickets() {
+      const container = document.getElementById("supportTicketsContainer");
+      if (!container) return;
+
+      if (isFirebaseReady && db) {
+        db.collection("support_tickets").orderBy("timestamp", "desc").limit(30).get().then(snap => {
+          supportTicketsList = [];
+          snap.forEach(doc => {
+            supportTicketsList.push({ id: doc.id, ...doc.data() });
+          });
+          renderSupportTickets();
+        }).catch(err => {
+          console.warn("Could not fetch support_tickets:", err);
+          const local = JSON.parse(localStorage.getItem("az_support_tickets") || "[]");
+          supportTicketsList = local;
+          renderSupportTickets();
+        });
+      } else {
+        const local = JSON.parse(localStorage.getItem("az_support_tickets") || "[]");
+        supportTicketsList = local;
+        renderSupportTickets();
+      }
+    }
+
+    function renderSupportTickets() {
+      const container = document.getElementById("supportTicketsContainer");
+      const badge1 = document.getElementById("supportBadgeCount");
+      const badge2 = document.getElementById("supportBadgeCountInner");
+
+      if (badge1) badge1.textContent = supportTicketsList.length;
+      if (badge2) badge2.textContent = supportTicketsList.length;
+
+      if (!container) return;
+      if (supportTicketsList.length === 0) {
+        container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 18px; font-size: 13px;">Обращений пока нет 🎉</div>';
+        return;
+      }
+
+      container.innerHTML = "";
+      supportTicketsList.forEach(t => {
+        const card = document.createElement("div");
+        card.className = "ticket-card";
+        const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+        card.innerHTML = `
+          <div class="ticket-header">
+            <div>
+              <span class="ticket-badge">${escapeHtml(t.category || "Баг")}</span>
+              <strong>${escapeHtml(t.nick || "Аноним")}</strong>
+              ${t.contact ? `<span style="color: var(--text-muted); font-size: 11px;">(${escapeHtml(t.contact)})</span>` : ""}
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 11px; color: var(--text-muted);">${dateStr}</span>
+              ${isAdmin && t.id ? `<button class="btn-icon" onclick="deleteSupportTicket('${t.id}')" title="Удалить">✕</button>` : ""}
+            </div>
+          </div>
+          <div style="font-size: 12.5px; margin-top: 4px; line-height: 1.4;">${escapeHtml(t.description || "")}</div>
+          ${t.screenshot ? `<div style="margin-top: 6px;"><a href="${t.screenshot}" target="_blank" class="proof-link" style="font-size: 11.5px;">🔗 Скриншот проблемы</a></div>` : ""}
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function deleteSupportTicket(id) {
+      if (!isAdmin || !isFirebaseReady || !db) return;
+      if (!confirm("Удалить это обращение?")) return;
+      db.collection("support_tickets").doc(id).delete().then(() => {
+        showToast("Обращение удалено");
+        loadSupportTickets();
+      }).catch(e => alert("Ошибка удаления: " + e.message));
+    }
+
+    function contactLeaderTelegram() {
+      const url = "https://t.me/frporp_bot";
+      window.open(url, "_blank");
     }
 
     // Run
