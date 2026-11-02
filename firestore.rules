@@ -1,45 +1,45 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Главный владелец (вы) — полный контроль над проектом
-    function isOwner() {
-      return request.auth != null && 
-        request.auth.token.email.lower() == 'goponos12@gmail.com';
+    function signedIn() {
+      return request.auth != null && request.auth.token.email is string;
     }
-
-    // Проверка прав администратора (вы ИЛИ email есть в списке config/admins)
+    function isOwner() {
+      return signedIn() && request.auth.token.email.lower() == 'goponos12@gmail.com';
+    }
     function isAdmin() {
       return isOwner() || (
-        request.auth != null &&
+        signedIn() &&
         exists(/databases/$(database)/documents/config/admins) &&
         request.auth.token.email.lower() in get(/databases/$(database)/documents/config/admins).data.emails
       );
     }
-
-    // Таблицы похвалы и отметок: читать может любой, менять — все админы
     match /sheets/{sheetId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if sheetId in ['fractionrp', 'praise'];
+      allow write: if isAdmin() && sheetId in ['fractionrp', 'praise'];
     }
-
-    // Список администраторов (config/admins):
-    // - Читать могут все (чтобы сайт знал, кому показать кнопки)
-    // - Менять список админов может ТОЛЬКО владелец (goponos12@gmail.com)
     match /config/admins {
-      allow read: if true;
+      allow read: if signedIn();
       allow write: if isOwner();
     }
-
-    // Служба поддержки и баг-репорты: любой пользователь может отправить, админы могут модерировать
+    match /config/settings {
+      allow read: if isAdmin();
+      allow write: if isOwner();
+    }
+    match /config/bot_state {
+      allow read, write: if isOwner();
+    }
     match /support_tickets/{ticketId} {
-      allow read, create: if true;
-      allow update, delete: if isAdmin();
-    }
-
-    match /{document=**} {
-      allow read: if true;
-      allow write: if isOwner();
+      allow create: if isAdmin() || (request.resource.data.keys().hasOnly(['nick','contact','category','description','screenshot','status','source','createdAt','timestamp']) &&
+        request.resource.data.nick is string && request.resource.data.nick.size() <= 80 &&
+        request.resource.data.description is string && request.resource.data.description.size() > 0 &&
+        request.resource.data.description.size() <= 4000 &&
+        request.resource.data.contact is string && request.resource.data.contact.size() <= 200 &&
+        request.resource.data.category is string && request.resource.data.category.size() <= 80 &&
+        request.resource.data.screenshot is string && request.resource.data.screenshot.size() <= 1000 &&
+        request.resource.data.status == 'Новое' &&
+        request.resource.data.source == 'site');
+      allow read, update, delete: if isAdmin();
     }
   }
 }
