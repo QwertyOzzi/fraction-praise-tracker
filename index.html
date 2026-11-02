@@ -520,7 +520,6 @@
 
       <div class="auth-tabs">
         <div class="auth-tab active" id="tabGoogleBtn" onclick="switchAuthTab('google')">Google (Почта)</div>
-        <div class="auth-tab" id="tabKeyBtn" onclick="switchAuthTab('key')">Секретный ключ</div>
         <div class="auth-tab" id="tabEmailBtn" onclick="switchAuthTab('email')">Email и пароль</div>
       </div>
 
@@ -534,24 +533,7 @@
         </button>
       </div>
 
-      <!-- Tab 2: Key / Password System -->
-      <div id="authKeyPane" style="display: none;">
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
-          Введите секретный мастер-ключ или PIN-код лидера для локальной активации прав редактирования:
-        </p>
-        <div class="form-group">
-          <label>Ключ доступа:</label>
-          <input type="password" id="secretKeyInput" placeholder="Введите ключ доступа...">
-        </div>
-        <button class="btn btn-primary" style="width: 100%; justify-content: center;" onclick="verifyAccessKey()">
-          Активировать доступ
-        </button>
-        <div style="margin-top: 12px; text-align: center;">
-          <a href="javascript:void(0)" onclick="generateNewHash()" style="font-size: 11.5px; color: var(--text-muted); text-decoration: underline;">
-            ⚙️ Сгенерировать хэш для нового ключа
-          </a>
-        </div>
-      </div>
+
 
       <!-- Tab 3: Email / Password -->
       <div id="authEmailPane" style="display: none;">
@@ -1017,24 +999,7 @@
       // Добавьте сюда email других лидеров/замов
     ];
 
-    // Секретный мастер-ключ на случай офлайн/локального доступа
-    // ╔══════════════════════════════════════════════════════════════════╗
-    // ║  КРИПТОГРАФИЧЕСКИЙ ХЭШ КЛЮЧА (SHA-256)                          ║
-    // ║  Сам пароль в коде НЕ хранится! Из хэша восстановить пароль     ║
-    // ║  математически невозможно. В коде лежит только хэш.             ║
-    // ╚══════════════════════════════════════════════════════════════════╝
-    const MASTER_KEY_HASH = "ec26ab1d8911111af974ba69499adac643fda2006d93c3653f75e6640e33a6e9";
-    const OWNER_KEY_HASH = "cb9771d5a486e9a629e5cad7681f91b614bed091463b2882cf6df60431510551"; // kiidsg12#$$
-    const DEPUTY_KEY_HASH = "e59a11e4fbde18b792bed4822c1ce1fd87649bd2ac37b619dc81517cfecaba0f"; // NEXUS-U1B23D-FRNP
 
-    // Функция безопасного хэширования через браузерный Web Crypto API
-    async function hashKey(text) {
-      const msgBuffer = new TextEncoder().encode(text);
-      const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
-      return Array.from(new Uint8Array(hashBuffer))
-        .map(b => b.toString(16).padStart(2, "0"))
-        .join("");
-    }
 
     // ╔══════════════════════════════════════════════════════════════════╗
     // ║  2. ИСХОДНЫЕ ДАННЫЕ ИЗ GOOGLE ТАБЛИЦЫ                         ║
@@ -1093,7 +1058,8 @@
     function init() {
       initTheme();
       setupFirebase();
-      checkKeySession();
+      sessionStorage.removeItem("az_admin_key_unlocked");
+      localStorage.removeItem("az_admin_key_unlocked");
       sanitizeSearchInput();
       renderTable();
       updateBadges();
@@ -1225,16 +1191,8 @@
         if (ownerBtn) ownerBtn.style.display = "none";
         const ctrlBtn = document.getElementById("controlPanelBtn");
         if (ctrlBtn) ctrlBtn.style.display = "none";
-        checkKeySession();
-      }
-    }
-
-    function checkKeySession() {
-      const keySaved = sessionStorage.getItem("az_admin_key_unlocked");
-      if (keySaved === "true") {
-        setAdminState(true, "Доступ по ключу лидера");
-        renderAuthUI({ displayName: "Ключ лидера" });
-      } else if (!currentUser) {
+        sessionStorage.removeItem("az_admin_key_unlocked");
+        localStorage.removeItem("az_admin_key_unlocked");
         setAdminState(false, null);
         renderAuthUI(null);
       }
@@ -1636,11 +1594,9 @@
     function switchAuthTab(tab) {
       document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
       document.getElementById("authGooglePane").style.display = tab === "google" ? "block" : "none";
-      document.getElementById("authKeyPane").style.display = tab === "key" ? "block" : "none";
       document.getElementById("authEmailPane").style.display = tab === "email" ? "block" : "none";
 
       if (tab === "google") document.getElementById("tabGoogleBtn").classList.add("active");
-      if (tab === "key") document.getElementById("tabKeyBtn").classList.add("active");
       if (tab === "email") document.getElementById("tabEmailBtn").classList.add("active");
     }
 
@@ -1677,36 +1633,7 @@
       });
     }
 
-    // Secret Key System (проверка по криптографическому SHA-256 хэшу)
-    async function verifyAccessKey() {
-      const key = document.getElementById("secretKeyInput").value.trim();
-      if (!key) return alert("Введите ключ доступа!");
 
-      const enteredHash = await hashKey(key);
-      if (enteredHash === MASTER_KEY_HASH || enteredHash === OWNER_KEY_HASH) {
-        sessionStorage.setItem("az_admin_key_unlocked", "true");
-        setAdminState(true, "👑 Главный Лидер");
-        renderAuthUI({ displayName: "Владелец" });
-        closeAuthModal();
-        showToast("Доступ Главного Лидера активирован!");
-      } else if (enteredHash === DEPUTY_KEY_HASH) {
-        sessionStorage.setItem("az_admin_key_unlocked", "true");
-        setAdminState(true, "⭐ Заместитель / Лидер");
-        renderAuthUI({ displayName: "Заместитель" });
-        closeAuthModal();
-        showToast("Доступ заместителя активирован!");
-      } else {
-        alert("Неверный ключ доступа!");
-      }
-    }
-
-    // Утилита для генерации нового хэша прямо из браузера
-    async function generateNewHash() {
-      const newPwd = prompt("Введите новый секретный ключ для генерации хэша:");
-      if (!newPwd) return;
-      const h = await hashKey(newPwd);
-      prompt("Скопируйте этот хэш и вставьте в константу MASTER_KEY_HASH в файле index.html:", h);
-    }
 
     function logout() {
       sessionStorage.removeItem("az_admin_key_unlocked");
