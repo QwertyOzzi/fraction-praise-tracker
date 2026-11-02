@@ -332,6 +332,7 @@
       <button class="btn btn-success admin-only" onclick="markAllFilteredAsIssued()" title="Выдать всем со статусом «На выдаче»">
         <span>✓</span> Выдать всем
       </button>
+      <button class="btn btn-outline" id="manageAdminsBtn" style="display:none;" onclick="openAdminsModal()"><span>👥</span> Админы</button>
       <button class="btn btn-warning admin-only" onclick="initFirestoreFromDefaults()" title="Загрузить стартовую таблицу в облако Firebase">
         <span>📦</span> В облако
       </button>
@@ -526,6 +527,35 @@
     </div>
   </div>
 
+    <!-- Modal: Manage Admins -->
+  <div class="modal-overlay" id="adminsModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>👥 Управление администраторами</h3>
+        <button class="btn-icon" onclick="closeAdminsModal()">✕</button>
+      </div>
+      <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px;">
+        Пользователи из этого списка получают доступ к кнопкам <strong>[+]</strong>, <strong>[-]</strong> и смене статусов при входе через Google.
+      </p>
+
+      <div class="form-group" style="display: flex; gap: 8px;">
+        <input type="email" id="newAdminEmailInput" placeholder="почта_заместителя@gmail.com" style="flex: 1;">
+        <button class="btn btn-primary" onclick="addAdminEmail()">+ Добавить</button>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Действующие администраторы:</label>
+        <div id="adminsListContainer" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 6px; background: var(--bg);">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeAdminsModal()">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div class="toast" id="toastMessage"></div>
 
@@ -547,6 +577,101 @@
     };
     const firebaseConfig = FIREBASE_CONFIG; // алиас для совместимости
     // Список разрешенных почт (клиентская + серверная проверка в firestore.rules)
+        const OWNER_EMAIL = "goponos12@gmail.com";
+    let adminEmailsList = ["goponos12@gmail.com"];
+
+    // Listen to admin list changes in Firestore
+    function listenToAdmins() {
+      if (!db) return;
+      db.collection("config").doc("admins").onSnapshot(doc => {
+        if (doc.exists && doc.data() && Array.isArray(doc.data().emails)) {
+          adminEmailsList = doc.data().emails.map(e => e.toLowerCase());
+        } else {
+          adminEmailsList = [OWNER_EMAIL.toLowerCase()];
+          // Auto create initial admins doc if owner
+          if (currentUser && currentUser.email && currentUser.email.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+            db.collection("config").doc("admins").set({ emails: [OWNER_EMAIL.toLowerCase()] }).catch(()=>{});
+          }
+        }
+        if (currentUser) {
+          handleUserAuth(currentUser);
+        }
+        renderAdminsList();
+      }, err => {
+        console.warn("Listen to admins error:", err);
+      });
+    }
+
+    function openAdminsModal() {
+      renderAdminsList();
+      document.getElementById("adminsModal").style.display = "flex";
+      document.getElementById("newAdminEmailInput").focus();
+    }
+
+    function closeAdminsModal() {
+      document.getElementById("adminsModal").style.display = "none";
+    }
+
+    function renderAdminsList() {
+      const container = document.getElementById("adminsListContainer");
+      if (!container) return;
+      container.innerHTML = "";
+
+      const uniqueEmails = Array.from(new Set([OWNER_EMAIL.toLowerCase(), ...adminEmailsList]));
+
+      uniqueEmails.forEach(email => {
+        const isOwner = email === OWNER_EMAIL.toLowerCase();
+        const row = document.createElement("div");
+        row.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 13px;";
+        row.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span>${escapeHtml(email)}</span>
+            ${isOwner ? '<span style="font-size: 10px; background: #e8f0fe; color: #1a73e8; padding: 1px 5px; border-radius: 4px; font-weight: 600;">Владелец</span>' : ''}
+          </div>
+          ${!isOwner ? `<button class="btn-icon" onclick="removeAdminEmail('${escapeHtml(email)}')" title="Отозвать права">✕</button>` : ''}
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function addAdminEmail() {
+      if (!isFirebaseReady || !db) return alert("Firebase не подключен");
+      const input = document.getElementById("newAdminEmailInput");
+      const email = (input.value || "").trim().toLowerCase();
+      if (!email || !email.includes("@")) return alert("Введите корректный email (например, name@gmail.com)!");
+
+      if (adminEmailsList.includes(email)) return alert("Этот пользователь уже администратор!");
+
+      const updated = Array.from(new Set([...adminEmailsList, email]));
+      db.collection("config").doc("admins").set({
+        emails: updated,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).then(() => {
+        input.value = "";
+        showToast("Добавлен администратор: " + email);
+        renderAdminsList();
+      }).catch(err => {
+        alert("Ошибка добавления администратора: " + err.message);
+      });
+    }
+
+    function removeAdminEmail(email) {
+      if (!isFirebaseReady || !db) return;
+      if (email.toLowerCase() === OWNER_EMAIL.toLowerCase()) return alert("Нельзя удалить владельца!");
+      if (!confirm("Отозвать права администратора у " + email + "?")) return;
+
+      const updated = adminEmailsList.filter(e => e.toLowerCase() !== email.toLowerCase());
+      db.collection("config").doc("admins").set({
+        emails: updated,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).then(() => {
+        showToast("Права отозваны у: " + email);
+        renderAdminsList();
+      }).catch(err => {
+        alert("Ошибка удаления: " + err.message);
+      });
+    }
+
     const ALLOWED_ADMIN_EMAILS = [
       "goponos12@gmail.com"
       // Добавьте сюда email других лидеров/замов
@@ -642,6 +767,7 @@
 
         // Слушаем обновления данных в реальном времени
         listenToFirestore();
+        listenToAdmins();
 
       } catch (err) {
         console.error("Firebase init error:", err);
@@ -688,17 +814,23 @@
     function handleUserAuth(user) {
       if (user) {
         const email = (user.email || "").toLowerCase();
-        const isEmailAllowed = ALLOWED_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(email);
+        const isOwner = email === OWNER_EMAIL.toLowerCase();
+        const isEmailAllowed = isOwner || adminEmailsList.map(e => e.toLowerCase()).includes(email);
+
+        // Show/hide Manage Admins button for Owner
+        const ownerBtn = document.getElementById("manageAdminsBtn");
+        if (ownerBtn) ownerBtn.style.display = isOwner ? "inline-flex" : "none";
 
         if (isEmailAllowed) {
-          setAdminState(true, `Администратор: ${email}`);
+          setAdminState(true, isOwner ? `👑 Владелец: ${email}` : `⭐ Админ: ${email}`);
         } else {
           setAdminState(false, null);
-          showToast(`Вход выполнен (${email}), но почты нет в списке администраторов`);
+          showToast(`Вход выполнен (${email}), но у вас нет прав редактора`);
         }
         renderAuthUI(user);
       } else {
-        // check if unlocked via secret key
+        const ownerBtn = document.getElementById("manageAdminsBtn");
+        if (ownerBtn) ownerBtn.style.display = "none";
         checkKeySession();
       }
     }

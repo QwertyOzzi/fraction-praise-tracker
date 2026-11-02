@@ -2,22 +2,38 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Проверка администратора по почте
-    function isAdmin() {
-      return request.auth != null &&
-        request.auth.token.email in ['goponos12@gmail.com'];
+    // Главный владелец (вы) — полный контроль над проектом
+    function isOwner() {
+      return request.auth != null && 
+        request.auth.token.email.lower() == 'goponos12@gmail.com';
     }
 
-    // Листы таблицы (fractionrp, praise) — читать может любой, редактировать только админ
+    // Проверка прав администратора (вы ИЛИ email есть в списке config/admins)
+    function isAdmin() {
+      return isOwner() || (
+        request.auth != null &&
+        exists(/databases/$(database)/documents/config/admins) &&
+        request.auth.token.email.lower() in get(/databases/$(database)/documents/config/admins).data.emails
+      );
+    }
+
+    // Таблицы похвалы и отметок: читать может любой, менять — все админы
     match /sheets/{sheetId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Все остальные документы
+    // Список администраторов (config/admins):
+    // - Читать могут все (чтобы сайт знал, кому показать кнопки)
+    // - Менять список админов может ТОЛЬКО владелец (goponos12@gmail.com)
+    match /config/admins {
+      allow read: if true;
+      allow write: if isOwner();
+    }
+
     match /{document=**} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isOwner();
     }
   }
 }
