@@ -916,6 +916,7 @@
         }
         if (currentUser) {
           handleUserAuth(currentUser);
+          listenToSupportTickets();
         }
         renderAdminsList();
       }, err => {
@@ -1117,13 +1118,14 @@
         auth.onAuthStateChanged(user => {
           currentUser = user;
           handleUserAuth(user);
+          listenToAdmins();
+          listenToSupportTickets();
         });
 
         // Слушаем обновления данных в реальном времени
         listenToFirestore();
         listenToAdmins();
         listenToSystemSettings();
-        listenToSupportTickets();
 
       } catch (err) {
         console.error("Firebase init error:", err);
@@ -1143,23 +1145,11 @@
       if (!db) return;
       ["fractionrp", "praise"].forEach(tab => {
         db.collection("sheets").doc(tab).onSnapshot(doc => {
-          if (doc.exists) {
-            const data = doc.data();
-            if (data && Array.isArray(data.rows) && data.rows.length > 0) {
-              appData[tab] = data.rows;
-              renderTable();
-              updateBadges();
-              return;
-            }
-          }
-          // Если документа еще нет в базе, но мы админ - автоматически заливаем начальные данные!
-          if (isAdmin && (!doc.exists || !doc.data() || !doc.data().rows)) {
-            console.log("Автоматическая инициализация вкладки " + tab);
-            db.collection("sheets").doc(tab).set({
-              rows: DEFAULT_DATA[tab],
-              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }).catch(e => console.warn("Auto-seed error on " + tab, e));
-          }
+          const data = doc.exists ? doc.data() : null;
+          lastSyncedRows[tab] = data && Array.isArray(data.rows) ? JSON.parse(JSON.stringify(data.rows)) : null;
+          appData[tab] = lastSyncedRows[tab] ? JSON.parse(JSON.stringify(lastSyncedRows[tab])) : [];
+          renderTable();
+          updateBadges();
         }, err => {
           console.warn("Firestore snapshot on " + tab + ":", err);
         });
@@ -1201,6 +1191,7 @@
 
     function setAdminState(admin, label) {
       isAdmin = admin;
+      if (!admin && supportTicketsUnsubscribe) { supportTicketsUnsubscribe(); supportTicketsUnsubscribe = null; supportTicketsList = []; }
       document.body.classList.toggle("is-admin", admin);
 
       const banner = document.getElementById("modeBanner");
@@ -1237,19 +1228,27 @@
       }
     }
 
-    // Save Data (to Firestore if online, otherwise localStorage)
+    // Reject stale writes instead of erasing newer bot/admin updates.
+    const lastSyncedRows = { fractionrp: null, praise: null };
+    const sheetWriteQueues = { fractionrp: Promise.resolve(), praise: Promise.resolve() };
     function persistData() {
-      if (isFirebaseReady && db && isAdmin) {
-        db.collection("sheets").doc(currentTab).set({
-          rows: appData[currentTab],
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }).catch(err => {
-          console.error("Firestore write failed:", err);
-          showToast("Ошибка записи в облако: " + err.message);
-        });
-      } else {
-        localStorage.setItem("az_table_data_" + currentTab, JSON.stringify(appData[currentTab]));
+      const tab = currentTab;
+      if (!isFirebaseReady || !db || !isAdmin || !currentUser || !lastSyncedRows[tab]) {
+        showToast("Не сохранено: требуется подключение и загруженная таблица");
+        return;
       }
+      const expected = JSON.stringify(lastSyncedRows[tab]);
+      const desired = JSON.parse(JSON.stringify(appData[tab]));
+      sheetWriteQueues[tab] = sheetWriteQueues[tab].catch(() => {}).then(() => db.runTransaction(async tx => {
+        const ref = db.collection("sheets").doc(tab);
+        const snap = await tx.get(ref);
+        if (!snap.exists || !Array.isArray(snap.data().rows)) throw new Error("MISSING_SHEET");
+        if (JSON.stringify(snap.data().rows) !== expected) throw new Error("CONFLICT");
+        tx.update(ref, { rows: desired, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      })).catch(err => {
+        console.error("Safe sheet write rejected:", err);
+        showToast("Не сохранено: конфликт или ошибка связи. Проверьте актуальную таблицу.");
+      });
       updateBadges();
     }
 
@@ -1268,25 +1267,7 @@
 
     // Initialize Firestore with default Google Sheets data (Admin only)
     function initFirestoreFromDefaults() {
-      if (!isFirebaseReady || !db) {
-        alert("Firebase не настроен! См. инструкцию SETUP.md");
-        return;
-      }
-      if (!isAdmin) {
-        alert("Только администратор может загрузить данные!");
-        return;
-      }
-      if (!confirm("Загрузить начальные данные из Google Таблицы в облако Firebase?")) return;
-
-      Promise.all([
-        db.collection("sheets").doc("fractionrp").set({ rows: DEFAULT_DATA.fractionrp }),
-        db.collection("sheets").doc("praise").set({ rows: DEFAULT_DATA.praise }),
-        db.collection("config").doc("admins").set({ emails: ALLOWED_ADMIN_EMAILS })
-      ]).then(() => {
-        showToast("Данные успешно загружены в облако Firebase!");
-      }).catch(err => {
-        alert("Ошибка загрузки: " + err.message);
-      });
+      alert("Повторная загрузка стандартных данных отключена для защиты текущих таблиц и прав.");
     }
 
     // Switch Tabs
@@ -1750,11 +1731,11 @@
       document.querySelectorAll("#supportTabs .auth-tab").forEach(t => t.classList.remove("active"));
       document.getElementById("supportFormPane").style.display = tab === "form" ? "block" : "none";
       document.getElementById("supportDirectPane").style.display = tab === "direct" ? "block" : "none";
-      document.getElementById("supportListPane").style.display = tab === "list" ? "block" : "none";
+      document.getElementById("supportListPane").style.display = tab === "list" && isAdmin ? "block" : "none";
 
       if (tab === "form") document.getElementById("tabSupportFormBtn").classList.add("active");
       if (tab === "direct") document.getElementById("tabSupportDirectBtn").classList.add("active");
-      if (tab === "list") {
+      if (tab === "list" && isAdmin) {
         document.getElementById("tabSupportListBtn").classList.add("active");
         loadSupportTickets();
       }
@@ -1802,18 +1783,7 @@
         console.warn("Bot API submit error:", e);
       }
 
-      // 2. Если пользователь залогинен в Firebase и бот недоступен, пишем напрямую в Firestore
-      if (!sentViaBot && isFirebaseReady && db) {
-        try {
-          await db.collection("support_tickets").add({
-            ...ticketData,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          sentViaBot = true;
-        } catch (err) {
-          console.warn("Direct Firestore write error:", err);
-        }
-      }
+      // Anonymous requests are accepted only by the bounded server API.
 
       if (!sentViaBot) {
         saveLocalTicket(ticketData);
@@ -1831,13 +1801,20 @@
       const local = JSON.parse(localStorage.getItem("az_support_tickets") || "[]");
       local.unshift(ticketData);
       localStorage.setItem("az_support_tickets", JSON.stringify(local));
-      showToast("Обращение сохранено!");
+      showToast("Не отправлено: сохранено только локально в браузере.");
       closeSupportModal();
     }
 
+    let supportTicketsUnsubscribe = null;
     function listenToSupportTickets() {
-      if (!db) return;
-      db.collection("support_tickets").onSnapshot(snap => {
+      if (!db || !isAdmin || !currentUser) {
+        if (supportTicketsUnsubscribe) { supportTicketsUnsubscribe(); supportTicketsUnsubscribe = null; }
+        supportTicketsList = [];
+        renderSupportTickets();
+        return;
+      }
+      if (supportTicketsUnsubscribe) return;
+      supportTicketsUnsubscribe = db.collection("support_tickets").onSnapshot(snap => {
         supportTicketsList = [];
         snap.forEach(doc => {
           supportTicketsList.push({ id: doc.id, ...doc.data() });
@@ -1854,6 +1831,7 @@
     }
 
     function loadSupportTickets() {
+      if (!isAdmin || !currentUser) return;
       if (!isFirebaseReady || !db) {
         const local = JSON.parse(localStorage.getItem("az_support_tickets") || "[]");
         supportTicketsList = local;
@@ -1926,18 +1904,25 @@
             <div style="display: flex; align-items: center; gap: 6px;">
               ${statusBadge}
               <span style="font-size: 11px; color: var(--text-muted);">${dateStr}</span>
-              ${isAdmin && t.id ? `<button class="btn-icon" onclick="deleteSupportTicket('${t.id}')" title="Удалить обращение">✕</button>` : ""}
+              ${isAdmin && t.id ? `<button class="btn-icon" data-ticket-action="delete" title="Удалить обращение">✕</button>` : ""}
             </div>
           </div>
           <div style="font-size: 12.5px; margin-top: 5px; line-height: 1.45; white-space: pre-wrap;">${escapeHtml(t.description || "")}</div>
           ${safeExternalUrl(t.screenshot) ? `<div style="margin-top: 6px;"><a href="${escapeHtml(safeExternalUrl(t.screenshot))}" target="_blank" class="proof-link" rel="noopener noreferrer" style="font-size: 11.5px;">🔗 Скриншот проблемы</a></div>` : ""}
           ${isAdmin && t.id && t.status !== "Решено" ? `
             <div style="display: flex; gap: 6px; margin-top: 8px;">
-              ${t.status !== "В работе" ? `<button class="btn btn-mini" onclick="updateTicketStatus('${t.id}', 'В работе')">🟡 В работу</button>` : ""}
-              <button class="btn btn-mini btn-success" onclick="updateTicketStatus('${t.id}', 'Решено')">✅ Решено</button>
+              ${t.status !== "В работе" ? `<button class="btn btn-mini" data-ticket-action="progress">🟡 В работу</button>` : ""}
+              <button class="btn btn-mini btn-success" data-ticket-action="resolved">✅ Решено</button>
             </div>
           ` : ""}
         `;
+        card.querySelectorAll("[data-ticket-action]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            if (!isAdmin) return;
+            if (btn.dataset.ticketAction === "delete") deleteSupportTicket(t.id);
+            else updateTicketStatus(t.id, btn.dataset.ticketAction === "progress" ? "В работе" : "Решено");
+          });
+        });
         container.appendChild(card);
       });
     }
@@ -2040,7 +2025,7 @@
     }
 
     function openControlPanelModal() {
-      if (!currentUser || currentUser.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+      if (!currentUser || !currentUser.email || currentUser.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
         alert("Доступно только Главному Техническому Администратору!");
         return;
       }
@@ -2167,10 +2152,11 @@
         alert("Этот email уже есть в списке!");
         return;
       }
-      adminEmailsList.push(email);
-      saveAdminsToFirestore();
-      input.value = "";
-      renderCtrlAdminsList();
+      if (!isOwnerActive() || !isFirebaseReady || !db) return;
+      const updated = Array.from(new Set([...adminEmailsList, email]));
+      db.collection("config").doc("admins").set({ emails: updated, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+        .then(() => { input.value = ""; showToast("Администратор добавлен"); })
+        .catch(err => { console.error("Admin write failed:", err); showToast("Ошибка сохранения прав"); });
     }
 
     function downloadFullBackup() {
@@ -2205,7 +2191,7 @@
     }
 
     function isOwnerActive() {
-      if (!currentUser || currentUser.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+      if (!currentUser || !currentUser.email || currentUser.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
         alert("Действие разрешено только Главному Тех. Администратору!");
         return false;
       }
