@@ -1,0 +1,43 @@
+name: Media, deletion and audit UI regression
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse JavaScript and guard UI and deletion policy
+        run: |
+          node - <<'JS'
+          const fs = require('fs'), vm = require('vm'), assert = require('node:assert/strict');
+          const html = fs.readFileSync('index.html','utf8');
+          const rules = fs.readFileSync('firestore.rules','utf8');
+          const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
+          assert(scripts.length > 0);
+          scripts.forEach((m,i)=>new vm.Script(m[1],{filename:'script-'+i+'.js'}));
+          const required = [
+            'settings-layout','settings-menu','settings-content',
+            'auditFilterSource','auditFilterActor','auditFilterFrom','auditFilterTo',
+            'function auditRecordDate(', 'function renderAuditLog()',
+            'source: "bug"', 'От кого:', 'toLocaleString("ru-RU"',
+            'DELETE_HAS_BALANCE', 'DELETE_IDENTITY_CHANGED',
+            'if (pos < 0) continue; // Already deleted',
+            'Number(rows[index].qty || 0) > 0',
+            't.video_id', 't.photo_id'
+          ];
+          for(const needle of required) assert(html.includes(needle), 'Missing '+needle);
+          assert(rules.includes("match /audit_log/{eventId}"));
+          assert(rules.includes("'photo_id','video_id'"));
+          assert(rules.includes("allow read: if isOwner();"));
+          assert(rules.includes("allow update, delete: if false;"));
+          console.log('Media, deletion and audit UI invariants satisfied');
+          JS
