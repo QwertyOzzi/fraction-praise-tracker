@@ -1170,8 +1170,9 @@
     function handleUserAuth(user) {
       if (user) {
         const email = (user.email || "").toLowerCase();
-        const isOwner = email === OWNER_EMAIL.toLowerCase();
-        const isEmailAllowed = isOwner || adminEmailsList.map(e => e.toLowerCase()).includes(email);
+        const verified = user.emailVerified === true;
+        const isOwner = verified && email === OWNER_EMAIL.toLowerCase();
+        const isEmailAllowed = verified && (isOwner || adminEmailsList.map(e => e.toLowerCase()).includes(email));
 
         // Show/hide Manage Admins button for Owner
         const ownerBtn = document.getElementById("manageAdminsBtn");
@@ -1184,7 +1185,9 @@
           setAdminState(true, isOwner ? `🛠️ Тех. Администратор: ${email}` : `⭐ Админ: ${email}`);
         } else {
           setAdminState(false, null);
-          showToast(`Вход выполнен (${email}), но у вас нет прав редактора`);
+          showToast(!verified
+            ? "Для административного доступа сначала подтвердите свою почту"
+            : `Вход выполнен (${email}), но у вас нет прав редактора`);
         }
         renderAuthUI(user);
       } else {
@@ -1227,6 +1230,7 @@
           <button class="btn btn-outline" onclick="logout()" title="Выйти из аккаунта">
             <span>👤</span> ${escapeHtml(title)} (Выйти)
           </button>
+          ${!user.emailVerified ? '<button class="btn btn-outline" onclick="sendAdminVerificationEmail()">📨 Подтвердить почту</button>' : ''}
         `;
       } else {
         container.innerHTML = `
@@ -1652,6 +1656,16 @@
     }
 
 
+
+    async function sendAdminVerificationEmail() {
+      if (!auth || !auth.currentUser) return;
+      try {
+        await auth.currentUser.sendEmailVerification();
+        showToast("Письмо отправлено. Подтвердите адрес и войдите снова.");
+      } catch (err) {
+        showToast("Не удалось отправить письмо: " + err.message);
+      }
+    }
 
     function logout() {
       sessionStorage.removeItem("az_admin_key_unlocked");
