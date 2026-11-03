@@ -989,6 +989,7 @@
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }).then(() => {
         input.value = "";
+        writeSiteAudit("admin_added", "Добавлен администратор " + email);
         showToast("Добавлен администратор: " + email);
         renderAdminsList();
       }).catch(err => {
@@ -1006,6 +1007,7 @@
         emails: updated,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }).then(() => {
+        writeSiteAudit("admin_removed", "Отозваны права у " + email);
         showToast("Права отозваны у: " + email);
         renderAdminsList();
       }).catch(err => {
@@ -2044,6 +2046,7 @@
       db.collection("support_tickets").doc(id).update({
         status: newStatus
       }).then(() => {
+        writeSiteAudit("ticket_status", "Обращение: статус изменён на " + newStatus);
         showToast("Статус обновлен: " + newStatus);
       }).catch(e => alert("Ошибка обновления: " + e.message));
     }
@@ -2052,6 +2055,7 @@
       if (!isAdmin || !isFirebaseReady || !db) return;
       if (!confirm("Удалить это обращение?")) return;
       db.collection("support_tickets").doc(id).delete().then(() => {
+        writeSiteAudit("ticket_deleted", "Обращение удалено");
         showToast("Обращение удалено");
       }).catch(e => alert("Ошибка удаления: " + e.message));
     }
@@ -2170,6 +2174,17 @@
       }
     }
 
+    function writeSiteAudit(action, details) {
+      if (!isFirebaseReady || !db || !isAdmin || !currentUser) return;
+      const actorEmail = String(currentUser.email || "").toLowerCase();
+      db.collection("audit_log").add({
+        source: "site", action: String(action).slice(0,55), sheet: "",
+        actor: actorEmail, actorEmail, actorUid: currentUser.uid,
+        details: String(details).slice(0,500),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(err => console.warn("Activity log write failed:", err.code || err.message));
+    }
+
     // Owner-only activity log; event text is inserted via textContent to prevent XSS.
     function loadAuditLog() {
       if (!db || !currentUser || (currentUser.email || "").toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
@@ -2203,7 +2218,10 @@
       db.collection("config").doc("settings").set({
         auditTelegramEnabled: Boolean(enabled),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, {merge:true}).then(() => showToast(enabled ? "Telegram-уведомления включены" : "Telegram-уведомления отключены"))
+      }, {merge:true}).then(() => {
+        writeSiteAudit("notifications_changed", enabled ? "Telegram-уведомления включены" : "Telegram-уведомления выключены");
+        showToast(enabled ? "Telegram-уведомления включены" : "Telegram-уведомления отключены");
+      })
         .catch(err => { showToast("Не удалось сохранить настройку: " + String(err.code || err.message)); });
     }
 
@@ -2230,6 +2248,7 @@
       };
 
       db.collection("config").doc("settings").set(payload, { merge: true }).then(() => {
+        writeSiteAudit("leader_settings", "Изменены настройки лидера и техадминистратора");
         showToast("✅ Действующий Лидер и контакты успешно сохранены!");
       }).catch(err => {
         alert("Ошибка сохранения: " + err.message);
@@ -2249,6 +2268,7 @@
       };
 
       db.collection("config").doc("settings").set(payload, { merge: true }).then(() => {
+        writeSiteAudit("bot_settings", "Обновлены настройки Telegram-бота");
         showToast("✅ Настройки бота успешно сохранены!");
       }).catch(err => {
         alert("Ошибка сохранения: " + err.message);
