@@ -27,6 +27,28 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if isOwner();
     }
+    // Immutable audit trail, readable only by the technical owner.
+    // Staff may record only their own website edits; Telegram events are
+    // written by the bot's authenticated owner identity.
+    match /audit_log/{eventId} {
+      allow read: if isOwner();
+      allow create: if isOwner() || (
+        isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'source', 'action', 'sheet', 'actor', 'actorEmail',
+          'actorUid', 'details', 'createdAt'
+        ])
+        && request.resource.data.source == 'site'
+        && request.resource.data.action == 'sheet_edit'
+        && request.resource.data.actorEmail == request.auth.token.email.lower()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.details is string
+        && request.resource.data.details.size() <= 500
+        && request.resource.data.sheet in ['fractionrp', 'praise']
+        && request.resource.data.createdAt is timestamp
+      );
+      allow update, delete: if false;
+    }
     match /config/bot_state {
       allow read, write: if isOwner();
     }
