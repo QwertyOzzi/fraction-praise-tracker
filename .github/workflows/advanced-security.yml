@@ -33,7 +33,7 @@ jobs:
             'Safe ticket button event binding': html.includes('data-ticket-action='),
             'No direct Firestore public ticket bridge': !html.includes('db.collection("support_tickets").add('),
             'No dangerous default data overwrite': !html.includes('rows: DEFAULT_DATA.fractionrp') && !html.includes('rows: DEFAULT_DATA[tab]'),
-            'Transaction-based guarded sheet writes': html.includes('db.runTransaction(async tx =>') && html.includes('new Error("CONFLICT")'),
+            'Transaction-based guarded sheet writes': html.includes('db.runTransaction(async tx =>') && html.includes('new Error("CONFLICT_"'),
             'No undefined admin save handler': !html.includes('saveAdminsToFirestore()'),
             'Ticket Firestore writes must be authorized': rules.includes('allow create: if isAdmin()'),
             'Ticket reader authorization': rules.includes('allow read, update, delete: if isAdmin()'),
