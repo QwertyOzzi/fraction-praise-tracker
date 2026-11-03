@@ -887,9 +887,29 @@
           <p style="font-size:12px;color:var(--text-muted);margin-top:6px;">Включает сообщения о действиях лидера и заместителей в боте. Можно отключить в любой момент.</p>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <strong>Последние 100 событий</strong>
+          <strong>История действий и обращений</strong>
           <button class="btn btn-outline" onclick="loadAuditLog()">🔄 Обновить</button>
         </div>
+        <div class="audit-filters" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0;">
+          <label style="font-size:12px;">Источник
+            <select id="auditFilterSource" onchange="renderAuditLog()" style="width:100%;">
+              <option value="all">Все события</option>
+              <option value="telegram">Действия в Telegram</option>
+              <option value="site">Действия на сайте</option>
+              <option value="bug">Обращения и баги</option>
+            </select>
+          </label>
+          <label style="font-size:12px;">Исполнитель / ник / Telegram / действие
+            <input id="auditFilterActor" type="search" oninput="renderAuditLog()" placeholder="Поиск по журналу" style="width:100%;">
+          </label>
+          <label style="font-size:12px;">С даты
+            <input id="auditFilterFrom" type="date" onchange="renderAuditLog()" style="width:100%;">
+          </label>
+          <label style="font-size:12px;">По дату
+            <input id="auditFilterTo" type="date" onchange="renderAuditLog()" style="width:100%;">
+          </label>
+        </div>
+        <p id="auditLogInfo" style="font-size:11px;color:var(--text-muted);margin-bottom:7px;">Последние 100 событий журнала и доступные обращения. Все даты — по времени вашего устройства.</p>
         <div id="auditLogContainer" style="max-height:370px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:9px;">Откройте журнал для загрузки.</div>
       </div>
 
@@ -2004,6 +2024,7 @@
           return tB - tA;
         });
         renderSupportTickets();
+        renderAuditLog();
       }, err => {
         console.warn("Could not listen to support_tickets:", err);
       });
@@ -2028,6 +2049,7 @@
           return tB - tA;
         });
         renderSupportTickets();
+        renderAuditLog();
       }).catch(err => {
         console.warn("Fetch support tickets error:", err);
       });
@@ -2057,7 +2079,8 @@
       supportTicketsList.forEach(t => {
         const card = document.createElement("div");
         card.className = "ticket-card";
-        const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+        const stamp = auditRecordDate(t.timestamp || t.createdAt);
+        const dateStr = stamp ? stamp.toLocaleString("ru-RU", { day:"2-digit", month:"2-digit",year:"numeric", hour:"2-digit",minute:"2-digit",second:"2-digit" }) : "Дата неизвестна";
         
         const isFromTg = t.source === "telegram";
         const srcBadge = isFromTg 
@@ -2088,6 +2111,7 @@
           </div>
           <div style="font-size: 12.5px; margin-top: 5px; line-height: 1.45; white-space: pre-wrap;">${escapeHtml(t.description || "")}</div>
           ${safeExternalUrl(t.screenshot) ? `<div style="margin-top: 6px;"><a href="${escapeHtml(safeExternalUrl(t.screenshot))}" target="_blank" class="proof-link" rel="noopener noreferrer" style="font-size: 11.5px;">🔗 Скриншот проблемы</a></div>` : ""}
+          ${t.photo_id || t.video_id ? `<div style="margin-top:6px;color:var(--text-muted);font-size:11px;">📎 ${t.video_id ? "Видео" : "Фото"} приложено в Telegram (смотрите сообщение бота)</div>` : ""}
           ${isAdmin && t.id && t.status !== "Решено" ? `
             <div style="display: flex; gap: 6px; margin-top: 8px;">
               ${t.status !== "В работе" ? `<button class="btn btn-mini" data-ticket-action="progress">🟡 В работу</button>` : ""}
@@ -2254,35 +2278,95 @@
       }).catch(err => console.warn("Activity log write failed:", err.code || err.message));
     }
 
-    // Owner-only activity log; event text is inserted via textContent to prevent XSS.
+    // Activity feed uses DOM textContent. Firestore logs are accessible only to owner,
+    // support tickets are loaded through the existing authorized support listener.
     let auditLogUnsubscribe = null;
-    function loadAuditLog() {
-      if (!db || !currentUser || (currentUser.email || "").toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
+    let auditHistoryItems = [];
+    let auditLogFailure = "";
+    function auditRecordDate(raw) {
+      const candidate = raw && typeof raw.toDate === "function" ? raw.toDate()
+        : raw && typeof raw === "object" && Number.isFinite(raw.seconds)
+          ? new Date(raw.seconds * 1000) : new Date(raw || 0);
+      return Number.isFinite(candidate.getTime()) ? candidate : null;
+    }
+    function renderAuditLog() {
       const container = document.getElementById("auditLogContainer");
       if (!container) return;
-      container.textContent = "Загрузка...";
+      container.textContent = "";
+      const sourceFilter = document.getElementById("auditFilterSource")?.value || "all";
+      const textFilter = (document.getElementById("auditFilterActor")?.value || "").trim().toLowerCase();
+      const dateFrom = document.getElementById("auditFilterFrom")?.value || "";
+      const dateTo = document.getElementById("auditFilterTo")?.value || "";
+      const start = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : -Infinity;
+      const finish = dateTo ? new Date(dateTo + "T23:59:59.999").getTime() : Infinity;
+      const events = auditHistoryItems.map(e => ({
+        type: "event", source: String(e.source || "site"), action: String(e.action || ""),
+        actor: String(e.actor || e.actorEmail || e.actorTelegramId || "Неизвестно"),
+        details: String(e.details || ""), date: auditRecordDate(e.createdAt),
+        sheet: String(e.sheet || "")
+      }));
+      const tickets = supportTicketsList.map(t => ({
+        type: "bug", source: "bug", action: String(t.category || "Обращение") + " (" + String(t.status || "Новое") + ")",
+        actor: String(t.nick || "Аноним") + (t.contact ? " • " + String(t.contact) : ""),
+        details: String(t.description || "") + ((t.photo_id || t.video_id) ? "\n📎 Медиафайл получен через Telegram" : ""),
+        date: auditRecordDate(t.timestamp || t.createdAt), sheet: ""
+      }));
+      const rows = [...events, ...tickets]
+        .filter(e => sourceFilter === "all" || e.source === sourceFilter)
+        .filter(e => !textFilter ||
+          [e.actor, e.action, e.details, e.source, e.sheet].some(v => v.toLowerCase().includes(textFilter)))
+        .filter(e => (!e.date && start === -Infinity && finish === Infinity)
+          || (e.date && e.date.getTime() >= start && e.date.getTime() <= finish))
+        .sort((a,b)=>(b.date?.getTime() || 0) - (a.date?.getTime() || 0)).slice(0, 200);
+      const info = document.getElementById("auditLogInfo");
+      if (info) info.textContent = "Показано: " + rows.length + " • журнал: " + auditHistoryItems.length
+        + " • обращения: " + supportTicketsList.length + ". Дата и время указаны по вашему устройству.";
+      if (auditLogFailure && sourceFilter !== "bug") {
+        const warning = document.createElement("p");
+        warning.style.cssText = "padding:10px;color:#b45309;border-bottom:1px solid var(--border);font-size:12px;white-space:pre-wrap;";
+        warning.textContent = "Журнал действий Firebase недоступен: " + auditLogFailure
+          + ". Необходимо опубликовать актуальные firestore.rules с разделом audit_log. Обращения отображаются отдельно.";
+        container.appendChild(warning);
+      }
+      if (!rows.length) {
+        const p = document.createElement("p"); p.textContent = "Нет событий по выбранным фильтрам.";
+        container.appendChild(p);
+      }
+      for (const e of rows) {
+        const row = document.createElement("div");
+        row.style.cssText = "padding:9px 7px;border-bottom:1px solid var(--border);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;";
+        const top = document.createElement("div"); top.style.fontWeight = "700";
+        const when = e.date ? e.date.toLocaleString("ru-RU", {
+          year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"
+        }) : "Дата не указана";
+        top.textContent = when + " • " + (e.type === "bug" ? "🐛 Обращение" : e.source === "telegram" ? "🤖 Telegram" : "🌐 Сайт");
+        const who = document.createElement("div");
+        who.textContent = "От кого: " + e.actor.slice(0,180);
+        const what = document.createElement("div");
+        what.textContent = "Событие: " + e.action.slice(0,100) + (e.sheet ? " • " + e.sheet.slice(0,30) : "");
+        const detail = document.createElement("div");
+        detail.style.cssText = "color:var(--text-muted);margin-top:4px;";
+        detail.textContent = e.details.slice(0,600);
+        row.append(top,who,what,detail);
+        container.appendChild(row);
+      }
+    }
+    function loadAuditLog() {
+      if (!db || !currentUser || (currentUser.email || "").toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
       if (auditLogUnsubscribe) auditLogUnsubscribe();
+      auditLogFailure = "";
       auditLogUnsubscribe = db.collection("audit_log").orderBy("createdAt", "desc").limit(100).onSnapshot(
         snap => {
-          container.textContent = "";
-          if (snap.empty) { container.textContent = "Событий пока нет."; return; }
-          snap.forEach(doc => {
-            const e = doc.data() || {};
-            const row = document.createElement("div");
-            row.style.cssText = "padding:9px;border-bottom:1px solid var(--border);font-size:12px;white-space:pre-wrap;";
-            const time = e.createdAt && e.createdAt.toDate ? e.createdAt.toDate().toLocaleString("ru-RU") : "—";
-            const actor = String(e.actor || e.actorEmail || "Неизвестно").slice(0, 90);
-            row.textContent = time + " | " + String(e.source || "").slice(0, 20)
-              + " | " + actor + " | " + String(e.action || "").slice(0, 55)
-              + " | " + String(e.sheet || "").slice(0, 30)
-              + "\n" + String(e.details || "").slice(0, 500);
-            container.appendChild(row);
-          });
+          auditHistoryItems = snap.docs.map(d => d.data() || {});
+          auditLogFailure = "";
+          renderAuditLog();
         }, err => {
           auditLogUnsubscribe = null;
-          container.textContent = "Нет доступа к журналу (" + String(err.code || err.message).slice(0, 90)
-            + "). Опубликуйте новые Firestore Rules для audit_log.";
+          auditHistoryItems = [];
+          auditLogFailure = String(err.code || err.message).slice(0,100);
+          renderAuditLog();
         });
+      renderAuditLog();
     }
 
     function updateAuditTelegramNotifications(enabled) {
