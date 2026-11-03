@@ -39,12 +39,20 @@ service cloud.firestore {
           'actorUid', 'details', 'createdAt'
         ])
         && request.resource.data.source == 'site'
-        && request.resource.data.action == 'sheet_edit'
+        && request.resource.data.action in [
+          'sheet_edit', 'admin_added', 'admin_removed', 'leader_settings',
+          'bot_settings', 'ticket_status', 'ticket_deleted', 'notifications_changed'
+        ]
+        && request.resource.data.actor is string
+        && request.resource.data.actor.size() <= 100
         && request.resource.data.actorEmail == request.auth.token.email.lower()
         && request.resource.data.actorUid == request.auth.uid
         && request.resource.data.details is string
         && request.resource.data.details.size() <= 500
-        && request.resource.data.sheet in ['fractionrp', 'praise']
+        && ((request.resource.data.action == 'sheet_edit'
+             && request.resource.data.sheet in ['fractionrp', 'praise'])
+          || (request.resource.data.action != 'sheet_edit'
+             && request.resource.data.sheet == ''))
         && request.resource.data.createdAt is timestamp
       );
       allow update, delete: if false;
