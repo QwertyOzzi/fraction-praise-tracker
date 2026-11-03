@@ -65,13 +65,17 @@ service cloud.firestore {
       // Public users must submit tickets through the rate-limited bot API.
       // The bot authenticates as the Firebase owner; staff may also create tickets.
       allow create: if isAdmin()
-        && request.resource.data.keys().hasOnly(['nick','contact','category','description','screenshot','status','source','createdAt','timestamp','photo_id'])
+        && request.resource.data.keys().hasOnly(['nick','contact','category','description','screenshot','status','source','createdAt','timestamp','photo_id','video_id'])
         && request.resource.data.nick is string && request.resource.data.nick.size() <= 80
         && request.resource.data.description is string && request.resource.data.description.size() > 0
         && request.resource.data.description.size() <= 4000
         && request.resource.data.contact is string && request.resource.data.contact.size() <= 200
         && request.resource.data.category is string && request.resource.data.category.size() <= 80
         && request.resource.data.screenshot is string && request.resource.data.screenshot.size() <= 1000
+        && (!('photo_id' in request.resource.data)
+          || (request.resource.data.photo_id is string && request.resource.data.photo_id.size() <= 500))
+        && (!('video_id' in request.resource.data)
+          || (request.resource.data.video_id is string && request.resource.data.video_id.size() <= 500))
         && request.resource.data.status == 'Новое';
       allow read, update, delete: if isAdmin();
     }
