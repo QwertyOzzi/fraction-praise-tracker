@@ -1309,7 +1309,11 @@
               details.push("Добавлен " + String(wanted.nick || key));
               continue;
             }
-            if (pos < 0) throw new Error("CONCURRENT_DELETE");
+            if (pos < 0) {
+              // Telegram removed this unchanged row while the browser had a stale copy.
+              if (sameValue(wanted, original)) continue;
+              throw new Error("CONCURRENT_DELETE");
+            }
             for (const field of new Set([...Object.keys(original), ...Object.keys(wanted)])) {
               if (sameValue(original[field], wanted[field])) continue;
               if (!sameValue(rows[pos][field], original[field]) &&
@@ -1324,8 +1328,13 @@
             const key = rowKey(original);
             if (desiredById.has(key)) continue;
             const pos = rows.findIndex(r => rowKey(r) === key);
-            if (pos < 0) continue;
-            if (!sameValue(rows[pos], original)) throw new Error("CONCURRENT_DELETE_UPDATE");
+            if (pos < 0) continue; // Already deleted on the server: idempotent.
+            if (String(rows[pos].nick || "").toLowerCase() !== String(original.nick || "").toLowerCase())
+              throw new Error("DELETE_IDENTITY_CHANGED");
+            // Never silently delete earned points, even if the user's browser is stale.
+            if (Number(rows[pos].qty || 0) > 0) throw new Error("DELETE_HAS_BALANCE");
+            // Other fields (proof, rank, status) may have been refreshed by the bot:
+            // safe deletion still requires zero current balance and the same identity.
             rows.splice(pos, 1);
             details.push("Удалён " + String(original.nick || key));
           }
@@ -1355,7 +1364,12 @@
       } catch (err) {
         console.error("Firestore edit failed:", err);
         const reason = (err && (err.code || err.message)) || "unknown";
-        showToast("Не сохранено (" + String(reason).slice(0, 85) + "). Проверьте доступ или обновите таблицу.");
+        const msg = reason === "DELETE_HAS_BALANCE"
+          ? "Удаление отменено: агент получил баллы. Обновите таблицу."
+          : reason === "CONCURRENT_DELETE"
+          ? "Изменение отменено: агент уже удалён ботом. Таблица обновляется."
+          : "Не сохранено (" + String(reason).slice(0, 85) + "). Проверьте доступ или обновите таблицу.";
+        showToast(msg);
         sheetDirty[tab] = false;
         // Discard optimistic, uncommitted changes and reload authoritative state.
         db.collection("sheets").doc(tab).get({source:"server"}).then(doc => {
@@ -1694,7 +1708,11 @@
       if (!isAdmin) return;
       const rows = appData[currentTab];
       if (!rows || !rows[index]) return;
-      if (confirm(`Удалить ${rows[index].fullName}?`)) {
+      if (Number(rows[index].qty || 0) > 0) {
+        showToast("Нельзя удалить агента с баллами. Сначала выдайте их или используйте управление в боте.");
+        return;
+      }
+      if (confirm(`Удалить ${rows[index].fullName}? Только из текущей таблицы.`)) {
         rows.splice(index, 1);
         persistData().then(saved => { if (saved) showToast("Удалено"); });
         renderTable();
