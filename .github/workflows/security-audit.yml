@@ -1,3 +1,6 @@
+permissions:
+  contents: read
+
 name: Security audit checks
 on:
   pull_request:
