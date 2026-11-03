@@ -1146,6 +1146,8 @@
       ["fractionrp", "praise"].forEach(tab => {
         db.collection("sheets").doc(tab).onSnapshot(doc => {
           const data = doc.exists ? doc.data() : null;
+          // Firestore emits local and remote snapshots. Never erase an uncommitted edit.
+          if (sheetDirty[tab]) return;
           lastSyncedRows[tab] = data && Array.isArray(data.rows) ? JSON.parse(JSON.stringify(data.rows)) : null;
           appData[tab] = lastSyncedRows[tab] ? JSON.parse(JSON.stringify(lastSyncedRows[tab])) : [];
           renderTable();
@@ -1228,28 +1230,121 @@
       }
     }
 
-    // Reject stale writes instead of erasing newer bot/admin updates.
+    // Transactionally merge edited cells into the newest cloud state, preserving
+    // credits issued by the Telegram bot to other agents in the meantime.
     const lastSyncedRows = { fractionrp: null, praise: null };
-    const sheetWriteQueues = { fractionrp: Promise.resolve(), praise: Promise.resolve() };
+    const sheetDirty = { fractionrp: false, praise: false };
+    const sheetSaving = { fractionrp: false, praise: false };
+    const sheetEditVersion = { fractionrp: 0, praise: 0 };
+    const sheetSaveTimers = { fractionrp: null, praise: null };
+    const cloneRows = rows => JSON.parse(JSON.stringify(rows));
+    const sameValue = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+    const rowKey = row => String(row && row.id || "").trim();
+
     function persistData() {
       const tab = currentTab;
       if (!isFirebaseReady || !db || !isAdmin || !currentUser || !lastSyncedRows[tab]) {
-        showToast("Не сохранено: требуется подключение и загруженная таблица");
+        showToast("Не сохранено: требуется вход администратора и загруженная таблица.");
         return;
       }
-      const expected = JSON.stringify(lastSyncedRows[tab]);
-      const desired = JSON.parse(JSON.stringify(appData[tab]));
-      sheetWriteQueues[tab] = sheetWriteQueues[tab].catch(() => {}).then(() => db.runTransaction(async tx => {
-        const ref = db.collection("sheets").doc(tab);
-        const snap = await tx.get(ref);
-        if (!snap.exists || !Array.isArray(snap.data().rows)) throw new Error("MISSING_SHEET");
-        if (JSON.stringify(snap.data().rows) !== expected) throw new Error("CONFLICT");
-        tx.update(ref, { rows: desired, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      })).catch(err => {
-        console.error("Safe sheet write rejected:", err);
-        showToast("Не сохранено: конфликт или ошибка связи. Проверьте актуальную таблицу.");
-      });
-      updateBadges();
+      sheetDirty[tab] = true;
+      sheetEditVersion[tab]++;
+      clearTimeout(sheetSaveTimers[tab]);
+      sheetSaveTimers[tab] = setTimeout(() => flushSheetEdits(tab), 180);
+    }
+
+    async function flushSheetEdits(tab) {
+      if (sheetSaving[tab] || !sheetDirty[tab]) return;
+      if (!db || !isAdmin || !currentUser || !lastSyncedRows[tab]) return;
+      sheetSaving[tab] = true;
+      const revision = sheetEditVersion[tab];
+      const before = cloneRows(lastSyncedRows[tab]);
+      const desired = cloneRows(appData[tab]);
+      const beforeById = new Map(before.map(r => [rowKey(r), r]));
+      const desiredById = new Map(desired.map(r => [rowKey(r), r]));
+      const currentUid = currentUser.uid;
+      const currentEmail = String(currentUser.email || "").toLowerCase();
+      try {
+        const result = await db.runTransaction(async tx => {
+          const ref = db.collection("sheets").doc(tab);
+          const snap = await tx.get(ref);
+          if (!snap.exists || !Array.isArray(snap.data().rows)) throw new Error("MISSING_SHEET");
+          const rows = cloneRows(snap.data().rows);
+          const details = [];
+          // Update only fields the editor actually changed, not the entire stale sheet.
+          for (const wanted of desired) {
+            const key = rowKey(wanted);
+            if (!key) throw new Error("INVALID_ROW_ID");
+            const original = beforeById.get(key);
+            const pos = rows.findIndex(r => rowKey(r) === key);
+            if (!original) {
+              if (pos >= 0) throw new Error("CONCURRENT_ADD");
+              rows.unshift(cloneRows([wanted])[0]);
+              details.push("Добавлен " + String(wanted.nick || key));
+              continue;
+            }
+            if (pos < 0) throw new Error("CONCURRENT_DELETE");
+            for (const field of new Set([...Object.keys(original), ...Object.keys(wanted)])) {
+              if (sameValue(original[field], wanted[field])) continue;
+              if (!sameValue(rows[pos][field], original[field]) &&
+                  !sameValue(rows[pos][field], wanted[field])) {
+                throw new Error("CONFLICT_" + String(wanted.nick || key) + "_" + field);
+              }
+              rows[pos][field] = cloneRows([wanted[field] === undefined ? null : wanted[field]])[0];
+              details.push(String(wanted.nick || key) + ": " + field + " изменено");
+            }
+          }
+          for (const original of before) {
+            const key = rowKey(original);
+            if (desiredById.has(key)) continue;
+            const pos = rows.findIndex(r => rowKey(r) === key);
+            if (pos < 0) continue;
+            if (!sameValue(rows[pos], original)) throw new Error("CONCURRENT_DELETE_UPDATE");
+            rows.splice(pos, 1);
+            details.push("Удалён " + String(original.nick || key));
+          }
+          if (details.length) {
+            tx.update(ref, { rows, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          }
+          return {rows, details};
+        });
+        // Activity history is best-effort and cannot block committed table updates.
+        if (result.details.length) {
+          db.collection("audit_log").add({
+            source: "site", action: "sheet_edit", sheet: tab,
+            actor: currentEmail, actorEmail: currentEmail, actorUid: currentUid,
+            details: result.details.join("; ").slice(0, 500),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          }).catch(err => console.warn("Audit log unavailable:", err.code || err.message));
+        }
+        lastSyncedRows[tab] = cloneRows(result.rows);
+        if (sheetEditVersion[tab] === revision) {
+          appData[tab] = cloneRows(result.rows);
+          sheetDirty[tab] = false;
+          renderTable();
+          updateBadges();
+          showToast("Изменения сохранены в облаке");
+        }
+      } catch (err) {
+        console.error("Firestore edit failed:", err);
+        const reason = (err && (err.code || err.message)) || "unknown";
+        showToast("Не сохранено (" + String(reason).slice(0, 85) + "). Проверьте доступ или обновите таблицу.");
+        sheetDirty[tab] = false;
+        // Discard optimistic, uncommitted changes and reload authoritative state.
+        db.collection("sheets").doc(tab).get({source:"server"}).then(doc => {
+          const data = doc.exists ? doc.data() : null;
+          lastSyncedRows[tab] = data && Array.isArray(data.rows) ? cloneRows(data.rows) : null;
+          appData[tab] = lastSyncedRows[tab] ? cloneRows(lastSyncedRows[tab]) : [];
+          renderTable();
+          updateBadges();
+        }).catch(e => console.warn("Cloud reload failed:", e.code || e.message));
+      } finally {
+        sheetSaving[tab] = false;
+        if (sheetDirty[tab]) {
+          clearTimeout(sheetSaveTimers[tab]);
+          sheetSaveTimers[tab] = setTimeout(() => flushSheetEdits(tab), 180);
+        }
+      }
     }
 
     function loadLocalData() {
