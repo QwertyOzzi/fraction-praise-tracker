@@ -1,0 +1,38 @@
+name: Activity and editor regression
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  editor-and-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse inline JavaScript and verify audit protection
+        run: |
+          node - <<'JS'
+          const fs = require('fs'), vm = require('vm'), assert = require('assert');
+          const source = fs.readFileSync('index.html','utf8');
+          const rules = fs.readFileSync('firestore.rules','utf8');
+          const scripts = [...source.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
+          assert(scripts.length > 0);
+          scripts.forEach((m,i)=>new vm.Script(m[1],{filename:'inline-'+i+'.js'}));
+          for(const needle of [
+            'sheetDirty[tab]', 'sheetEditVersion[tab]', 'db.runTransaction(async tx =>',
+            'CONFLICT_', 'tx.update(ref, { rows,', 'writeSiteAudit(',
+            'function loadAuditLog()', 'function updateAuditTelegramNotifications(enabled)',
+            'data && Array.isArray(data.rows)', 'source: "site", action: "sheet_edit"',
+          ]) assert(source.includes(needle), 'Missing: '+needle);
+          for(const needle of [
+            'match /audit_log/{eventId}', 'allow read: if isOwner();',
+            'allow update, delete: if false;', 'request.resource.data.actorUid == request.auth.uid',
+          ]) assert(rules.includes(needle), 'Missing Firestore protection: '+needle);
+          console.log('Editor and audit regression checks passed');
+          JS
