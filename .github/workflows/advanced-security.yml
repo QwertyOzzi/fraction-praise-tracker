@@ -1,0 +1,56 @@
+name: Advanced security checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '15 4 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate all JavaScript and security boundaries
+        run: |
+          node - <<'JS'
+          const fs = require('fs'), vm = require('vm');
+          const html = fs.readFileSync('index.html', 'utf8');
+          const rules = fs.readFileSync('firestore.rules', 'utf8');
+          const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map(m => m[1]).filter(Boolean);
+          if (!scripts.length) throw Error('Missing JS');
+          scripts.forEach((js, i) => new vm.Script(js, { filename: 'inline-script-'+i+'.js' }));
+          const checks = {
+            'No dynamic ticket inline handlers': !/onclick="(?:deleteSupportTicket|updateTicketStatus)\(/.test(html),
+            'Safe ticket button event binding': html.includes('data-ticket-action='),
+            'No direct Firestore public ticket bridge': !html.includes('db.collection("support_tickets").add('),
+            'No dangerous default data overwrite': !html.includes('rows: DEFAULT_DATA.fractionrp') && !html.includes('rows: DEFAULT_DATA[tab]'),
+            'Transaction-based guarded sheet writes': html.includes('db.runTransaction(async tx =>') && html.includes('new Error("CONFLICT")'),
+            'No undefined admin save handler': !html.includes('saveAdminsToFirestore()'),
+            'Ticket Firestore writes must be authorized': rules.includes('allow create: if isAdmin()'),
+            'Ticket reader authorization': rules.includes('allow read, update, delete: if isAdmin()'),
+            'Administrator list access protected': rules.includes('match /config/admins {') && rules.includes('allow read: if isAdmin()'),
+            'Cloud bot ACL owner-only': rules.includes('match /config/bot_state {') && rules.includes('allow read, write: if isOwner()'),
+          };
+          for(const [check, ok] of Object.entries(checks)) if(!ok) throw Error(check);
+          console.log('Security invariants passed');
+          JS
+  secret-scanning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check repository and history for exposed credentials
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
