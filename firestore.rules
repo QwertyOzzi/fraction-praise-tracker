@@ -45,6 +45,7 @@ service cloud.firestore {
         ]
         && request.resource.data.actor is string
         && request.resource.data.actor.size() <= 100
+        && request.resource.data.actor == request.auth.token.email.lower()
         && request.resource.data.actorEmail == request.auth.token.email.lower()
         && request.resource.data.actorUid == request.auth.uid
         && request.resource.data.details is string
@@ -53,7 +54,7 @@ service cloud.firestore {
              && request.resource.data.sheet in ['fractionrp', 'praise'])
           || (request.resource.data.action != 'sheet_edit'
              && request.resource.data.sheet == ''))
-        && request.resource.data.createdAt is timestamp
+        && request.resource.data.createdAt == request.time
       );
       allow update, delete: if false;
     }
