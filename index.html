@@ -919,9 +919,11 @@
     let adminEmailsList = ["goponos12@gmail.com"];
 
     // Listen to admin list changes in Firestore
+    let adminListUnsubscribe = null;
     function listenToAdmins() {
-      if (!db) return;
-      db.collection("config").doc("admins").onSnapshot(doc => {
+      if (adminListUnsubscribe) { adminListUnsubscribe(); adminListUnsubscribe = null; }
+      if (!db || !currentUser) return;
+      adminListUnsubscribe = db.collection("config").doc("admins").onSnapshot(doc => {
         if (doc.exists && doc.data() && Array.isArray(doc.data().emails)) {
           adminEmailsList = doc.data().emails.map(e => e.toLowerCase());
         } else {
@@ -938,6 +940,7 @@
         renderAdminsList();
       }, err => {
         console.warn("Listen to admins error:", err);
+        adminListUnsubscribe = null;
       });
     }
 
@@ -1139,12 +1142,11 @@
           handleUserAuth(user);
           listenToAdmins();
           listenToSupportTickets();
+          listenToSystemSettings();
         });
 
         // Слушаем обновления данных в реальном времени
         listenToFirestore();
-        listenToAdmins();
-        listenToSystemSettings();
 
       } catch (err) {
         console.error("Firebase init error:", err);
@@ -1213,6 +1215,7 @@
     function setAdminState(admin, label) {
       isAdmin = admin;
       if (!admin && supportTicketsUnsubscribe) { supportTicketsUnsubscribe(); supportTicketsUnsubscribe = null; supportTicketsList = []; }
+      if (!admin && auditLogUnsubscribe) { auditLogUnsubscribe(); auditLogUnsubscribe = null; }
       document.body.classList.toggle("is-admin", admin);
 
       const banner = document.getElementById("modeBanner");
@@ -2075,9 +2078,11 @@
     };
     let systemSettings = Object.assign({}, defaultSystemSettings);
 
+    let settingsUnsubscribe = null;
     function listenToSystemSettings() {
-      if (!db) return;
-      db.collection("config").doc("settings").onSnapshot(doc => {
+      if (settingsUnsubscribe) { settingsUnsubscribe(); settingsUnsubscribe = null; }
+      if (!db || !currentUser) return;
+      settingsUnsubscribe = db.collection("config").doc("settings").onSnapshot(doc => {
         if (doc.exists && doc.data()) {
           const settingsData = doc.data();
           const { deputyKey: legacyKey, ...safeSettings } = settingsData;
@@ -2100,6 +2105,7 @@
         if (toggle) toggle.checked = systemSettings.auditTelegramEnabled !== false;
       }, err => {
         console.warn("Listen to settings error:", err);
+        settingsUnsubscribe = null;
       });
     }
 
@@ -2153,6 +2159,7 @@
     }
 
     function closeControlPanelModal() {
+      if (auditLogUnsubscribe) { auditLogUnsubscribe(); auditLogUnsubscribe = null; }
       document.getElementById("controlPanelModal").style.display = "none";
     }
 
@@ -2186,13 +2193,15 @@
     }
 
     // Owner-only activity log; event text is inserted via textContent to prevent XSS.
+    let auditLogUnsubscribe = null;
     function loadAuditLog() {
       if (!db || !currentUser || (currentUser.email || "").toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
       const container = document.getElementById("auditLogContainer");
       if (!container) return;
       container.textContent = "Загрузка...";
-      db.collection("audit_log").orderBy("createdAt", "desc").limit(100).get()
-        .then(snap => {
+      if (auditLogUnsubscribe) auditLogUnsubscribe();
+      auditLogUnsubscribe = db.collection("audit_log").orderBy("createdAt", "desc").limit(100).onSnapshot(
+        snap => {
           container.textContent = "";
           if (snap.empty) { container.textContent = "Событий пока нет."; return; }
           snap.forEach(doc => {
@@ -2207,7 +2216,8 @@
               + "\n" + String(e.details || "").slice(0, 500);
             container.appendChild(row);
           });
-        }).catch(err => {
+        }, err => {
+          auditLogUnsubscribe = null;
           container.textContent = "Нет доступа к журналу (" + String(err.code || err.message).slice(0, 90)
             + "). Опубликуйте новые Firestore Rules для audit_log.";
         });
