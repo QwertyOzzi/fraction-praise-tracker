@@ -20,6 +20,11 @@ jobs:
             .map(match => match[1]).filter(Boolean);
           if (!scripts.length) throw Error('No inline scripts');
           scripts.forEach((js, i) => new vm.Script(js, {filename:'inline-script-'+i+'.js'}));
+          const rules = fs.readFileSync('firestore.rules', 'utf8');
+          if (!rules.includes('request.auth.token.email_verified == true'))
+            throw Error('Firestore admin authentication requires a verified email');
+          if (!rules.includes('allow read: if isAdmin();'))
+            throw Error('Firestore admin email list must not be public to all signed-in users');
           const checks = {
             'No embedded deputy key literal': !/deputyKey\s*:\s*[\x27\x22]/.test(html),
             'No deputy key input': !html.includes('ctrlDeputyKey'),
@@ -29,7 +34,9 @@ jobs:
             'No inline untrusted admin email': !html.includes('onclick="removeAdminEmail('),
             'Event listeners for actions': html.includes('data-action="copy-command"')
               && html.includes('data-action="issue-command"'),
-            'Safe screenshot links': html.includes('safeExternalUrl(t.screenshot)')
+            'Safe screenshot links': html.includes('safeExternalUrl(t.screenshot)'),
+            'Verified email is checked in browser UI': html.includes('user.emailVerified === true'),
+            'Email verification action is offered': html.includes('sendAdminVerificationEmail()')
           };
           console.log(checks);
           for (const [label, passed] of Object.entries(checks)) {
