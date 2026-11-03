@@ -738,6 +738,7 @@
         <button class="settings-tab-btn" id="tabBtn_bot" onclick="openSettingsTab('bot')">🤖 Бот и ключи</button>
         <button class="settings-tab-btn" id="tabBtn_admins" onclick="openSettingsTab('admins')">👥 Админы сайта</button>
         <button class="settings-tab-btn" id="tabBtn_backup" onclick="openSettingsTab('backup')">💾 Бэкап и данные</button>
+        <button class="settings-tab-btn" id="tabBtn_audit" onclick="openSettingsTab('audit')">📋 Журнал действий</button>
       </div>
 
       <!-- Tab 1: Leader & Leadership Appointment -->
@@ -845,6 +846,22 @@
         <div class="modal-footer" style="margin-top: 14px;">
           <button class="btn" onclick="closeControlPanelModal()">Закрыть</button>
         </div>
+      </div>
+
+      <!-- Tab 5: Audit -->
+      <div id="settingsPane_audit" style="display:none;">
+        <div class="form-group" style="border:1px solid var(--border);padding:12px;border-radius:8px;">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="auditTelegramToggle" onchange="updateAuditTelegramNotifications(this.checked)" style="width:auto;">
+            Отправлять уведомления в Telegram техадминистратору
+          </label>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:6px;">Включает сообщения о действиях лидера и заместителей в боте. Можно отключить в любой момент.</p>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <strong>Последние 100 событий</strong>
+          <button class="btn btn-outline" onclick="loadAuditLog()">🔄 Обновить</button>
+        </div>
+        <div id="auditLogContainer" style="max-height:370px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:9px;">Откройте журнал для загрузки.</div>
       </div>
 
       <!-- Tab 4: Backup -->
@@ -2075,6 +2092,8 @@
           }
         }
         updateSettingsUI();
+        const toggle = document.getElementById("auditTelegramToggle");
+        if (toggle) toggle.checked = systemSettings.auditTelegramEnabled !== false;
       }, err => {
         console.warn("Listen to settings error:", err);
       });
@@ -2134,7 +2153,7 @@
     }
 
     function openSettingsTab(tabName) {
-      const tabs = ["leader", "bot", "admins", "backup"];
+      const tabs = ["leader", "bot", "admins", "backup", "audit"];
       tabs.forEach(t => {
         const pane = document.getElementById("settingsPane_" + t);
         const btn = document.getElementById("tabBtn_" + t);
@@ -2144,6 +2163,48 @@
       if (tabName === "admins") {
         renderCtrlAdminsList();
       }
+      if (tabName === "audit") {
+        const toggle = document.getElementById("auditTelegramToggle");
+        if (toggle) toggle.checked = systemSettings.auditTelegramEnabled !== false;
+        loadAuditLog();
+      }
+    }
+
+    // Owner-only activity log; event text is inserted via textContent to prevent XSS.
+    function loadAuditLog() {
+      if (!db || !currentUser || (currentUser.email || "").toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
+      const container = document.getElementById("auditLogContainer");
+      if (!container) return;
+      container.textContent = "Загрузка...";
+      db.collection("audit_log").orderBy("createdAt", "desc").limit(100).get()
+        .then(snap => {
+          container.textContent = "";
+          if (snap.empty) { container.textContent = "Событий пока нет."; return; }
+          snap.forEach(doc => {
+            const e = doc.data() || {};
+            const row = document.createElement("div");
+            row.style.cssText = "padding:9px;border-bottom:1px solid var(--border);font-size:12px;white-space:pre-wrap;";
+            const time = e.createdAt && e.createdAt.toDate ? e.createdAt.toDate().toLocaleString("ru-RU") : "—";
+            const actor = String(e.actor || e.actorEmail || "Неизвестно").slice(0, 90);
+            row.textContent = time + " | " + String(e.source || "").slice(0, 20)
+              + " | " + actor + " | " + String(e.action || "").slice(0, 55)
+              + " | " + String(e.sheet || "").slice(0, 30)
+              + "\n" + String(e.details || "").slice(0, 500);
+            container.appendChild(row);
+          });
+        }).catch(err => {
+          container.textContent = "Нет доступа к журналу (" + String(err.code || err.message).slice(0, 90)
+            + "). Опубликуйте новые Firestore Rules для audit_log.";
+        });
+    }
+
+    function updateAuditTelegramNotifications(enabled) {
+      if (!db || !currentUser || (currentUser.email || "").toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
+      db.collection("config").doc("settings").set({
+        auditTelegramEnabled: Boolean(enabled),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true}).then(() => showToast(enabled ? "Telegram-уведомления включены" : "Telegram-уведомления отключены"))
+        .catch(err => { showToast("Не удалось сохранить настройку: " + String(err.code || err.message)); });
     }
 
     function saveLeaderSettings() {
