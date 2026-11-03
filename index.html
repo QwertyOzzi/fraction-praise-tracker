@@ -738,6 +738,7 @@
         <button class="settings-tab-btn" id="tabBtn_bot" onclick="openSettingsTab('bot')">🤖 Бот и ключи</button>
         <button class="settings-tab-btn" id="tabBtn_admins" onclick="openSettingsTab('admins')">👥 Админы сайта</button>
         <button class="settings-tab-btn" id="tabBtn_backup" onclick="openSettingsTab('backup')">💾 Бэкап и данные</button>
+        <button class="settings-tab-btn" id="tabBtn_audit" onclick="openSettingsTab('audit')">📋 Журнал действий</button>
       </div>
 
       <!-- Tab 1: Leader & Leadership Appointment -->
@@ -847,6 +848,22 @@
         </div>
       </div>
 
+      <!-- Tab 5: Audit -->
+      <div id="settingsPane_audit" style="display:none;">
+        <div class="form-group" style="border:1px solid var(--border);padding:12px;border-radius:8px;">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="auditTelegramToggle" onchange="updateAuditTelegramNotifications(this.checked)" style="width:auto;">
+            Отправлять уведомления в Telegram техадминистратору
+          </label>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:6px;">Включает сообщения о действиях лидера и заместителей в боте. Можно отключить в любой момент.</p>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <strong>Последние 100 событий</strong>
+          <button class="btn btn-outline" onclick="loadAuditLog()">🔄 Обновить</button>
+        </div>
+        <div id="auditLogContainer" style="max-height:370px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:9px;">Откройте журнал для загрузки.</div>
+      </div>
+
       <!-- Tab 4: Backup -->
       <div id="settingsPane_backup" style="display: none;">
         <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 12px;">
@@ -902,9 +919,11 @@
     let adminEmailsList = ["goponos12@gmail.com"];
 
     // Listen to admin list changes in Firestore
+    let adminListUnsubscribe = null;
     function listenToAdmins() {
-      if (!db) return;
-      db.collection("config").doc("admins").onSnapshot(doc => {
+      if (adminListUnsubscribe) { adminListUnsubscribe(); adminListUnsubscribe = null; }
+      if (!db || !currentUser) return;
+      adminListUnsubscribe = db.collection("config").doc("admins").onSnapshot(doc => {
         if (doc.exists && doc.data() && Array.isArray(doc.data().emails)) {
           adminEmailsList = doc.data().emails.map(e => e.toLowerCase());
         } else {
@@ -921,6 +940,7 @@
         renderAdminsList();
       }, err => {
         console.warn("Listen to admins error:", err);
+        adminListUnsubscribe = null;
       });
     }
 
@@ -972,6 +992,7 @@
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }).then(() => {
         input.value = "";
+        writeSiteAudit("admin_added", "Добавлен администратор " + email);
         showToast("Добавлен администратор: " + email);
         renderAdminsList();
       }).catch(err => {
@@ -989,6 +1010,7 @@
         emails: updated,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }).then(() => {
+        writeSiteAudit("admin_removed", "Отозваны права у " + email);
         showToast("Права отозваны у: " + email);
         renderAdminsList();
       }).catch(err => {
@@ -1120,12 +1142,11 @@
           handleUserAuth(user);
           listenToAdmins();
           listenToSupportTickets();
+          listenToSystemSettings();
         });
 
         // Слушаем обновления данных в реальном времени
         listenToFirestore();
-        listenToAdmins();
-        listenToSystemSettings();
 
       } catch (err) {
         console.error("Firebase init error:", err);
@@ -1146,6 +1167,8 @@
       ["fractionrp", "praise"].forEach(tab => {
         db.collection("sheets").doc(tab).onSnapshot(doc => {
           const data = doc.exists ? doc.data() : null;
+          // Firestore emits local and remote snapshots. Never erase an uncommitted edit.
+          if (sheetDirty[tab]) return;
           lastSyncedRows[tab] = data && Array.isArray(data.rows) ? JSON.parse(JSON.stringify(data.rows)) : null;
           appData[tab] = lastSyncedRows[tab] ? JSON.parse(JSON.stringify(lastSyncedRows[tab])) : [];
           renderTable();
@@ -1192,6 +1215,7 @@
     function setAdminState(admin, label) {
       isAdmin = admin;
       if (!admin && supportTicketsUnsubscribe) { supportTicketsUnsubscribe(); supportTicketsUnsubscribe = null; supportTicketsList = []; }
+      if (!admin && auditLogUnsubscribe) { auditLogUnsubscribe(); auditLogUnsubscribe = null; }
       document.body.classList.toggle("is-admin", admin);
 
       const banner = document.getElementById("modeBanner");
@@ -1228,28 +1252,130 @@
       }
     }
 
-    // Reject stale writes instead of erasing newer bot/admin updates.
+    // Transactionally merge edited cells into the newest cloud state, preserving
+    // credits issued by the Telegram bot to other agents in the meantime.
     const lastSyncedRows = { fractionrp: null, praise: null };
-    const sheetWriteQueues = { fractionrp: Promise.resolve(), praise: Promise.resolve() };
+    const sheetDirty = { fractionrp: false, praise: false };
+    const sheetSaving = { fractionrp: false, praise: false };
+    const sheetEditVersion = { fractionrp: 0, praise: 0 };
+    const sheetSaveTimers = { fractionrp: null, praise: null };
+    const sheetSaveWaiters = { fractionrp: [], praise: [] };
+    const cloneRows = rows => JSON.parse(JSON.stringify(rows));
+    const sameValue = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+    const rowKey = row => String(row && row.id || "").trim();
+
     function persistData() {
       const tab = currentTab;
       if (!isFirebaseReady || !db || !isAdmin || !currentUser || !lastSyncedRows[tab]) {
-        showToast("Не сохранено: требуется подключение и загруженная таблица");
-        return;
+        showToast("Не сохранено: требуется вход администратора и загруженная таблица.");
+        return Promise.resolve(false);
       }
-      const expected = JSON.stringify(lastSyncedRows[tab]);
-      const desired = JSON.parse(JSON.stringify(appData[tab]));
-      sheetWriteQueues[tab] = sheetWriteQueues[tab].catch(() => {}).then(() => db.runTransaction(async tx => {
-        const ref = db.collection("sheets").doc(tab);
-        const snap = await tx.get(ref);
-        if (!snap.exists || !Array.isArray(snap.data().rows)) throw new Error("MISSING_SHEET");
-        if (JSON.stringify(snap.data().rows) !== expected) throw new Error("CONFLICT");
-        tx.update(ref, { rows: desired, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      })).catch(err => {
-        console.error("Safe sheet write rejected:", err);
-        showToast("Не сохранено: конфликт или ошибка связи. Проверьте актуальную таблицу.");
-      });
-      updateBadges();
+      sheetDirty[tab] = true;
+      sheetEditVersion[tab]++;
+      clearTimeout(sheetSaveTimers[tab]);
+      sheetSaveTimers[tab] = setTimeout(() => flushSheetEdits(tab), 180);
+      return new Promise(resolve => sheetSaveWaiters[tab].push(resolve));
+    }
+
+    async function flushSheetEdits(tab) {
+      if (sheetSaving[tab] || !sheetDirty[tab]) return;
+      if (!db || !isAdmin || !currentUser || !lastSyncedRows[tab]) return;
+      sheetSaving[tab] = true;
+      const waiters = sheetSaveWaiters[tab].splice(0);
+      let committed = false;
+      const revision = sheetEditVersion[tab];
+      const before = cloneRows(lastSyncedRows[tab]);
+      const desired = cloneRows(appData[tab]);
+      const beforeById = new Map(before.map(r => [rowKey(r), r]));
+      const desiredById = new Map(desired.map(r => [rowKey(r), r]));
+      const currentUid = currentUser.uid;
+      const currentEmail = String(currentUser.email || "").toLowerCase();
+      try {
+        const result = await db.runTransaction(async tx => {
+          const ref = db.collection("sheets").doc(tab);
+          const snap = await tx.get(ref);
+          if (!snap.exists || !Array.isArray(snap.data().rows)) throw new Error("MISSING_SHEET");
+          const rows = cloneRows(snap.data().rows);
+          const details = [];
+          // Update only fields the editor actually changed, not the entire stale sheet.
+          for (const wanted of desired) {
+            const key = rowKey(wanted);
+            if (!key) throw new Error("INVALID_ROW_ID");
+            const original = beforeById.get(key);
+            const pos = rows.findIndex(r => rowKey(r) === key);
+            if (!original) {
+              if (pos >= 0) throw new Error("CONCURRENT_ADD");
+              rows.unshift(cloneRows([wanted])[0]);
+              details.push("Добавлен " + String(wanted.nick || key));
+              continue;
+            }
+            if (pos < 0) throw new Error("CONCURRENT_DELETE");
+            for (const field of new Set([...Object.keys(original), ...Object.keys(wanted)])) {
+              if (sameValue(original[field], wanted[field])) continue;
+              if (!sameValue(rows[pos][field], original[field]) &&
+                  !sameValue(rows[pos][field], wanted[field])) {
+                throw new Error("CONFLICT_" + String(wanted.nick || key) + "_" + field);
+              }
+              rows[pos][field] = cloneRows([wanted[field] === undefined ? null : wanted[field]])[0];
+              details.push(String(wanted.nick || key) + ": " + field + " изменено");
+            }
+          }
+          for (const original of before) {
+            const key = rowKey(original);
+            if (desiredById.has(key)) continue;
+            const pos = rows.findIndex(r => rowKey(r) === key);
+            if (pos < 0) continue;
+            if (!sameValue(rows[pos], original)) throw new Error("CONCURRENT_DELETE_UPDATE");
+            rows.splice(pos, 1);
+            details.push("Удалён " + String(original.nick || key));
+          }
+          if (details.length) {
+            tx.update(ref, { rows, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          }
+          return {rows, details};
+        });
+        // Activity history is best-effort and cannot block committed table updates.
+        if (result.details.length) {
+          db.collection("audit_log").add({
+            source: "site", action: "sheet_edit", sheet: tab,
+            actor: currentEmail, actorEmail: currentEmail, actorUid: currentUid,
+            details: result.details.join("; ").slice(0, 500),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          }).catch(err => console.warn("Audit log unavailable:", err.code || err.message));
+        }
+        committed = true;
+        lastSyncedRows[tab] = cloneRows(result.rows);
+        if (sheetEditVersion[tab] === revision) {
+          appData[tab] = cloneRows(result.rows);
+          sheetDirty[tab] = false;
+          renderTable();
+          updateBadges();
+          showToast("Изменения сохранены в облаке");
+        }
+      } catch (err) {
+        console.error("Firestore edit failed:", err);
+        const reason = (err && (err.code || err.message)) || "unknown";
+        showToast("Не сохранено (" + String(reason).slice(0, 85) + "). Проверьте доступ или обновите таблицу.");
+        sheetDirty[tab] = false;
+        // Discard optimistic, uncommitted changes and reload authoritative state.
+        db.collection("sheets").doc(tab).get({source:"server"}).then(doc => {
+          const data = doc.exists ? doc.data() : null;
+          lastSyncedRows[tab] = data && Array.isArray(data.rows) ? cloneRows(data.rows) : null;
+          appData[tab] = lastSyncedRows[tab] ? cloneRows(lastSyncedRows[tab]) : [];
+          renderTable();
+          updateBadges();
+        }).catch(e => console.warn("Cloud reload failed:", e.code || e.message));
+      } finally {
+        sheetSaving[tab] = false;
+        waiters.forEach(resolve => resolve(committed));
+        if (!committed && sheetSaveWaiters[tab].length) {
+          sheetSaveWaiters[tab].splice(0).forEach(resolve => resolve(false));
+        }
+        if (sheetDirty[tab]) {
+          clearTimeout(sheetSaveTimers[tab]);
+          sheetSaveTimers[tab] = setTimeout(() => flushSheetEdits(tab), 180);
+        }
+      }
     }
 
     function loadLocalData() {
@@ -1468,9 +1594,8 @@
       if (!rows || !rows[index]) return;
       rows[index].qty = 0;
       rows[index].status = "Выдано";
-      persistData();
+      persistData().then(saved => { if (saved) showToast(`Счет ${rows[index].nick} обнулен`); });
       renderTable();
-      showToast(`Счет ${rows[index].nick} обнулен`);
     }
 
     function toggleRowStatus(index) {
@@ -1502,9 +1627,12 @@
       });
     }
 
-    function issueCommand(index, command) {
+    async function issueCommand(index, command) {
       if (!isAdmin) return;
-      copyCommand(command);
+      if (sheetSaving[currentTab]) {
+        showToast("Предыдущая операция ещё сохраняется. Повторите выдачу после подтверждения.");
+        return;
+      }
       const rows = appData[currentTab];
       if (rows && rows[index]) {
         const curQty = rows[index].qty || 0;
@@ -1517,8 +1645,12 @@
           rows[index].status = "На выдаче";
           showToast(`Выдано 1 для ${rows[index].nick}! Осталось: ${newQty}`);
         }
-        persistData();
         renderTable();
+        if (await persistData()) {
+          copyCommand(command);
+        } else {
+          showToast("Выдача не подтверждена Firebase. Команда не скопирована.");
+        }
       }
     }
 
@@ -1538,9 +1670,10 @@
           r.status = "Выдано";
         }
       });
-      persistData();
+      persistData().then(saved => {
+        if (saved) showToast("Все игроки отмечены как «Выдано»!");
+      });
       renderTable();
-      showToast("Все игроки отмечены как «Выдано»!");
     }
 
     function updateBadges() {
@@ -1563,9 +1696,8 @@
       if (!rows || !rows[index]) return;
       if (confirm(`Удалить ${rows[index].fullName}?`)) {
         rows.splice(index, 1);
-        persistData();
+        persistData().then(saved => { if (saved) showToast("Удалено"); });
         renderTable();
-        showToast("Удалено");
       }
     }
 
@@ -1684,10 +1816,9 @@
       };
 
       appData[currentTab].unshift(newRow);
-      persistData();
+      persistData().then(saved => { if (saved) showToast(`Агент ${fullName} добавлен!`); });
       renderTable();
       closeAddModal();
-      showToast(`Агент ${fullName} добавлен!`);
     }
 
     let toastTimer = null;
@@ -1932,6 +2063,7 @@
       db.collection("support_tickets").doc(id).update({
         status: newStatus
       }).then(() => {
+        writeSiteAudit("ticket_status", "Обращение: статус изменён на " + newStatus);
         showToast("Статус обновлен: " + newStatus);
       }).catch(e => alert("Ошибка обновления: " + e.message));
     }
@@ -1940,6 +2072,7 @@
       if (!isAdmin || !isFirebaseReady || !db) return;
       if (!confirm("Удалить это обращение?")) return;
       db.collection("support_tickets").doc(id).delete().then(() => {
+        writeSiteAudit("ticket_deleted", "Обращение удалено");
         showToast("Обращение удалено");
       }).catch(e => alert("Ошибка удаления: " + e.message));
     }
@@ -1959,9 +2092,11 @@
     };
     let systemSettings = Object.assign({}, defaultSystemSettings);
 
+    let settingsUnsubscribe = null;
     function listenToSystemSettings() {
-      if (!db) return;
-      db.collection("config").doc("settings").onSnapshot(doc => {
+      if (settingsUnsubscribe) { settingsUnsubscribe(); settingsUnsubscribe = null; }
+      if (!db || !currentUser) return;
+      settingsUnsubscribe = db.collection("config").doc("settings").onSnapshot(doc => {
         if (doc.exists && doc.data()) {
           const settingsData = doc.data();
           const { deputyKey: legacyKey, ...safeSettings } = settingsData;
@@ -1980,8 +2115,11 @@
           }
         }
         updateSettingsUI();
+        const toggle = document.getElementById("auditTelegramToggle");
+        if (toggle) toggle.checked = systemSettings.auditTelegramEnabled !== false;
       }, err => {
         console.warn("Listen to settings error:", err);
+        settingsUnsubscribe = null;
       });
     }
 
@@ -2035,11 +2173,12 @@
     }
 
     function closeControlPanelModal() {
+      if (auditLogUnsubscribe) { auditLogUnsubscribe(); auditLogUnsubscribe = null; }
       document.getElementById("controlPanelModal").style.display = "none";
     }
 
     function openSettingsTab(tabName) {
-      const tabs = ["leader", "bot", "admins", "backup"];
+      const tabs = ["leader", "bot", "admins", "backup", "audit"];
       tabs.forEach(t => {
         const pane = document.getElementById("settingsPane_" + t);
         const btn = document.getElementById("tabBtn_" + t);
@@ -2049,6 +2188,65 @@
       if (tabName === "admins") {
         renderCtrlAdminsList();
       }
+      if (tabName === "audit") {
+        const toggle = document.getElementById("auditTelegramToggle");
+        if (toggle) toggle.checked = systemSettings.auditTelegramEnabled !== false;
+        loadAuditLog();
+      }
+    }
+
+    function writeSiteAudit(action, details) {
+      if (!isFirebaseReady || !db || !isAdmin || !currentUser) return;
+      const actorEmail = String(currentUser.email || "").toLowerCase();
+      db.collection("audit_log").add({
+        source: "site", action: String(action).slice(0,55), sheet: "",
+        actor: actorEmail, actorEmail, actorUid: currentUser.uid,
+        details: String(details).slice(0,500),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(err => console.warn("Activity log write failed:", err.code || err.message));
+    }
+
+    // Owner-only activity log; event text is inserted via textContent to prevent XSS.
+    let auditLogUnsubscribe = null;
+    function loadAuditLog() {
+      if (!db || !currentUser || (currentUser.email || "").toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
+      const container = document.getElementById("auditLogContainer");
+      if (!container) return;
+      container.textContent = "Загрузка...";
+      if (auditLogUnsubscribe) auditLogUnsubscribe();
+      auditLogUnsubscribe = db.collection("audit_log").orderBy("createdAt", "desc").limit(100).onSnapshot(
+        snap => {
+          container.textContent = "";
+          if (snap.empty) { container.textContent = "Событий пока нет."; return; }
+          snap.forEach(doc => {
+            const e = doc.data() || {};
+            const row = document.createElement("div");
+            row.style.cssText = "padding:9px;border-bottom:1px solid var(--border);font-size:12px;white-space:pre-wrap;";
+            const time = e.createdAt && e.createdAt.toDate ? e.createdAt.toDate().toLocaleString("ru-RU") : "—";
+            const actor = String(e.actor || e.actorEmail || "Неизвестно").slice(0, 90);
+            row.textContent = time + " | " + String(e.source || "").slice(0, 20)
+              + " | " + actor + " | " + String(e.action || "").slice(0, 55)
+              + " | " + String(e.sheet || "").slice(0, 30)
+              + "\n" + String(e.details || "").slice(0, 500);
+            container.appendChild(row);
+          });
+        }, err => {
+          auditLogUnsubscribe = null;
+          container.textContent = "Нет доступа к журналу (" + String(err.code || err.message).slice(0, 90)
+            + "). Опубликуйте новые Firestore Rules для audit_log.";
+        });
+    }
+
+    function updateAuditTelegramNotifications(enabled) {
+      if (!db || !currentUser || (currentUser.email || "").toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
+      db.collection("config").doc("settings").set({
+        auditTelegramEnabled: Boolean(enabled),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true}).then(() => {
+        writeSiteAudit("notifications_changed", enabled ? "Telegram-уведомления включены" : "Telegram-уведомления выключены");
+        showToast(enabled ? "Telegram-уведомления включены" : "Telegram-уведомления отключены");
+      })
+        .catch(err => { showToast("Не удалось сохранить настройку: " + String(err.code || err.message)); });
     }
 
     function saveLeaderSettings() {
@@ -2074,6 +2272,7 @@
       };
 
       db.collection("config").doc("settings").set(payload, { merge: true }).then(() => {
+        writeSiteAudit("leader_settings", "Изменены настройки лидера и техадминистратора");
         showToast("✅ Действующий Лидер и контакты успешно сохранены!");
       }).catch(err => {
         alert("Ошибка сохранения: " + err.message);
@@ -2093,6 +2292,7 @@
       };
 
       db.collection("config").doc("settings").set(payload, { merge: true }).then(() => {
+        writeSiteAudit("bot_settings", "Обновлены настройки Telegram-бота");
         showToast("✅ Настройки бота успешно сохранены!");
       }).catch(err => {
         alert("Ошибка сохранения: " + err.message);
@@ -2155,7 +2355,7 @@
       if (!isOwnerActive() || !isFirebaseReady || !db) return;
       const updated = Array.from(new Set([...adminEmailsList, email]));
       db.collection("config").doc("admins").set({ emails: updated, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
-        .then(() => { input.value = ""; showToast("Администратор добавлен"); })
+        .then(() => { input.value = ""; writeSiteAudit("admin_added", "Добавлен администратор " + email); showToast("Администратор добавлен"); })
         .catch(err => { console.error("Admin write failed:", err); showToast("Ошибка сохранения прав"); });
     }
 
