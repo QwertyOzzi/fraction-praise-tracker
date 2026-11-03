@@ -2355,7 +2355,7 @@
       if (!isOwnerActive() || !isFirebaseReady || !db) return;
       const updated = Array.from(new Set([...adminEmailsList, email]));
       db.collection("config").doc("admins").set({ emails: updated, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
-        .then(() => { input.value = ""; showToast("Администратор добавлен"); })
+        .then(() => { input.value = ""; writeSiteAudit("admin_added", "Добавлен администратор " + email); showToast("Администратор добавлен"); })
         .catch(err => { console.error("Admin write failed:", err); showToast("Ошибка сохранения прав"); });
     }
 
