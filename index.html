@@ -1259,6 +1259,7 @@
     const sheetSaving = { fractionrp: false, praise: false };
     const sheetEditVersion = { fractionrp: 0, praise: 0 };
     const sheetSaveTimers = { fractionrp: null, praise: null };
+    const sheetSaveWaiters = { fractionrp: [], praise: [] };
     const cloneRows = rows => JSON.parse(JSON.stringify(rows));
     const sameValue = (a,b) => JSON.stringify(a) === JSON.stringify(b);
     const rowKey = row => String(row && row.id || "").trim();
@@ -1267,18 +1268,21 @@
       const tab = currentTab;
       if (!isFirebaseReady || !db || !isAdmin || !currentUser || !lastSyncedRows[tab]) {
         showToast("Не сохранено: требуется вход администратора и загруженная таблица.");
-        return;
+        return Promise.resolve(false);
       }
       sheetDirty[tab] = true;
       sheetEditVersion[tab]++;
       clearTimeout(sheetSaveTimers[tab]);
       sheetSaveTimers[tab] = setTimeout(() => flushSheetEdits(tab), 180);
+      return new Promise(resolve => sheetSaveWaiters[tab].push(resolve));
     }
 
     async function flushSheetEdits(tab) {
       if (sheetSaving[tab] || !sheetDirty[tab]) return;
       if (!db || !isAdmin || !currentUser || !lastSyncedRows[tab]) return;
       sheetSaving[tab] = true;
+      const waiters = sheetSaveWaiters[tab].splice(0);
+      let committed = false;
       const revision = sheetEditVersion[tab];
       const before = cloneRows(lastSyncedRows[tab]);
       const desired = cloneRows(appData[tab]);
@@ -1339,6 +1343,7 @@
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           }).catch(err => console.warn("Audit log unavailable:", err.code || err.message));
         }
+        committed = true;
         lastSyncedRows[tab] = cloneRows(result.rows);
         if (sheetEditVersion[tab] === revision) {
           appData[tab] = cloneRows(result.rows);
@@ -1362,6 +1367,10 @@
         }).catch(e => console.warn("Cloud reload failed:", e.code || e.message));
       } finally {
         sheetSaving[tab] = false;
+        waiters.forEach(resolve => resolve(committed));
+        if (!committed && sheetSaveWaiters[tab].length) {
+          sheetSaveWaiters[tab].splice(0).forEach(resolve => resolve(false));
+        }
         if (sheetDirty[tab]) {
           clearTimeout(sheetSaveTimers[tab]);
           sheetSaveTimers[tab] = setTimeout(() => flushSheetEdits(tab), 180);
@@ -1585,9 +1594,8 @@
       if (!rows || !rows[index]) return;
       rows[index].qty = 0;
       rows[index].status = "Выдано";
-      persistData();
+      persistData().then(saved => { if (saved) showToast(`Счет ${rows[index].nick} обнулен`); });
       renderTable();
-      showToast(`Счет ${rows[index].nick} обнулен`);
     }
 
     function toggleRowStatus(index) {
@@ -1619,9 +1627,12 @@
       });
     }
 
-    function issueCommand(index, command) {
+    async function issueCommand(index, command) {
       if (!isAdmin) return;
-      copyCommand(command);
+      if (sheetSaving[currentTab]) {
+        showToast("Предыдущая операция ещё сохраняется. Повторите выдачу после подтверждения.");
+        return;
+      }
       const rows = appData[currentTab];
       if (rows && rows[index]) {
         const curQty = rows[index].qty || 0;
@@ -1634,8 +1645,12 @@
           rows[index].status = "На выдаче";
           showToast(`Выдано 1 для ${rows[index].nick}! Осталось: ${newQty}`);
         }
-        persistData();
         renderTable();
+        if (await persistData()) {
+          copyCommand(command);
+        } else {
+          showToast("Выдача не подтверждена Firebase. Команда не скопирована.");
+        }
       }
     }
 
@@ -1655,9 +1670,10 @@
           r.status = "Выдано";
         }
       });
-      persistData();
+      persistData().then(saved => {
+        if (saved) showToast("Все игроки отмечены как «Выдано»!");
+      });
       renderTable();
-      showToast("Все игроки отмечены как «Выдано»!");
     }
 
     function updateBadges() {
@@ -1680,9 +1696,8 @@
       if (!rows || !rows[index]) return;
       if (confirm(`Удалить ${rows[index].fullName}?`)) {
         rows.splice(index, 1);
-        persistData();
+        persistData().then(saved => { if (saved) showToast("Удалено"); });
         renderTable();
-        showToast("Удалено");
       }
     }
 
@@ -1801,10 +1816,9 @@
       };
 
       appData[currentTab].unshift(newRow);
-      persistData();
+      persistData().then(saved => { if (saved) showToast(`Агент ${fullName} добавлен!`); });
       renderTable();
       closeAddModal();
-      showToast(`Агент ${fullName} добавлен!`);
     }
 
     let toastTimer = null;
