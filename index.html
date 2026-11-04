@@ -1475,6 +1475,25 @@
       renderTable();
     }
 
+    // Sort only the rendered view. Keep the original array indices so all
+    // edit / issue / delete controls still target the correct Firestore row.
+    function rankSortValue(value) {
+      const rank = String(value ?? "").trim().toUpperCase();
+      if (rank === "X" || /^10(?:\D|$)/.test(rank)) return 10;
+      const match = rank.match(/^([1-9])(?:\D|$)/);
+      return match ? Number(match[1]) : 0;
+    }
+
+    function sortedAgentEntries(rows) {
+      return rows.map((row, index) => ({ row, index })).sort((a, b) => {
+        const rankDifference = rankSortValue(b.row.rank) - rankSortValue(a.row.rank);
+        if (rankDifference) return rankDifference;
+        return String(a.row.nick || "").localeCompare(String(b.row.nick || ""), "ru", {
+          sensitivity: "base"
+        }) || a.index - b.index;
+      });
+    }
+
     // Render Table Rows
     function renderTable() {
       const tbody = document.getElementById("tableBody");
@@ -1488,7 +1507,7 @@
       let totalQty = 0;
       let visibleCount = 0;
 
-      rows.forEach((row, index) => {
+      sortedAgentEntries(rows).forEach(({ row, index }) => {
         const isPending = row.status === "На выдаче" || (row.qty > 0 && row.status !== "Выдано");
         if (isPending) pendingCount++;
         totalQty += (row.qty || 0);
@@ -1573,7 +1592,7 @@
         ` : '';
 
         tr.innerHTML = `
-          <td class="cell-num">${index + 1}</td>
+          <td class="cell-num">${visibleCount}</td>
           <td class="col-agent">
             <div class="agent-cell">
               <span class="agent-name">${escapeHtml(row.nick)}</span>
