@@ -15,6 +15,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Test rank ordering and correct edit targets
+        run: node tests/rank-sorting.test.cjs
       - name: Parse inline JavaScript and verify audit protection
         run: |
           node - <<'JS'
