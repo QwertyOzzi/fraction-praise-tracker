@@ -21,3 +21,30 @@ Before deploying, back up `sheets/fractionrp`, `sheets/praise`, `config/admins`,
 Use a Firebase Auth UID-based owner/admin ACL and a verified-identity migration after all existing staff have verified their accounts. Do not enable `email_verified` checks without first migrating existing user access. For stronger transaction semantics, migrate table rows into independent Firestore documents and update individual rows atomically, avoiding whole-array writes. Consider edge CAPTCHA/WAF for public support traffic.
 
 Enable GitHub branch protection and require green reviews/checks, GitHub MFA, and secret scanning. The repository integration cannot confirm or change those account-level settings. Do not leave Firebase in test mode.
+
+## Firebase collections for FBI Telegram agent actions and announcements (November 2026)
+
+The Telegram bot now writes three *new* owner-only collections:
+
+- `agent_action_logs/{eventId}` — immutable audit events for agent debits,
+  agent credit requests, and leadership decisions. No updates or deletes.
+- `agent_add_requests/{requestId}` — credit requests and the approved/rejected
+  decision. Only the Firebase owner account may read/create/update.
+- `fbi_announcements/{announcementId}` — owner/leader news broadcast status.
+  Only the Firebase owner account may read/create/update.
+
+The bot uses the existing authenticated Firebase owner identity. Telegram
+leadership roles are independently checked by the bot and are **not granted
+Firebase collection access**. Public viewers and site administrators cannot
+read these logs or write requests/announcements.
+
+**Important deployment requirement:** editing `firestore.rules` in GitHub
+**does not publish the live Firestore rules**. After backing up the currently
+active rules, an authorized owner must merge these collection-specific rules
+into **Firebase Console → Firestore Database → Rules** and click **Publish**.
+Retain all previously deployed rules, especially site permissions and bot-state
+ACL protections; never replace the live policy with an outdated example.
+Before relying on the new bot commands, verify read/create/update permissions
+using the owner account, verify denied access for ordinary users, and check
+that owner-only audit documents cannot be modified or deleted. Bot credentials
+and Telegram IDs must not be placed inside public rules or documentation.
