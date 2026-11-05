@@ -100,5 +100,24 @@ service cloud.firestore {
         && request.resource.data.status == 'Новое';
       allow read, update, delete: if isAdmin();
     }
+
+    // VK bridge: token redemption, links and report state are written only
+    // by the authenticated backend owner. Never grant public or staff writes.
+    match /vk_link_codes/{codeHash} {
+      allow read, create, update: if isOwner();
+      allow delete: if false;
+    }
+    match /vk_accounts/{vkUserId} {
+      allow read, create, delete: if isOwner();
+      allow update: if false;
+    }
+    match /tg_vk_links/{telegramUserId} {
+      allow read, create, delete: if isOwner();
+      allow update: if false;
+    }
+    match /vk_reports/{reportId} {
+      allow read, create, update: if isOwner();
+      allow delete: if false;
+    }
   }
 }
