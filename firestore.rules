@@ -61,6 +61,27 @@ service cloud.firestore {
     match /config/bot_state {
       allow read, write: if isOwner();
     }
+
+    // Telegram bot agent actions use a completely separate, immutable audit
+    // collection. No staff account or public website may read or forge it.
+    match /agent_action_logs/{eventId} {
+      allow read, create: if isOwner();
+      allow update, delete: if false;
+    }
+
+    // Agent credit requests can be decided only by the Telegram bot running
+    // under the existing owner Firebase identity after Telegram ACL checks.
+    match /agent_add_requests/{requestId} {
+      allow read, create, update: if isOwner();
+      allow delete: if false;
+    }
+
+    // Broadcasting journal for owner/leader Telegram announcements. The
+    // leadership permission is evaluated by the bot's signed Telegram ACL.
+    match /fbi_announcements/{announcementId} {
+      allow read, create, update: if isOwner();
+      allow delete: if false;
+    }
     match /support_tickets/{ticketId} {
       // Public users must submit tickets through the rate-limited bot API.
       // The bot authenticates as the Firebase owner; staff may also create tickets.
