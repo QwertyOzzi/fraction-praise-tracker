@@ -1389,19 +1389,19 @@
             details.push("Удалён " + String(original.nick || key));
           }
           if (details.length) {
+            // The edit and its immutable actor-bound audit event MUST commit together.
+            // A denied audit write prevents a silent, unlogged sheet change.
+            const auditRef = db.collection("audit_log").doc();
             tx.update(ref, { rows, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            tx.set(auditRef, {
+              source: "site", action: "sheet_edit", sheet: tab,
+              actor: currentEmail, actorEmail: currentEmail, actorUid: currentUid,
+              details: details.join("; ").slice(0, 500),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
           }
           return {rows, details};
         });
-        // Activity history is best-effort and cannot block committed table updates.
-        if (result.details.length) {
-          db.collection("audit_log").add({
-            source: "site", action: "sheet_edit", sheet: tab,
-            actor: currentEmail, actorEmail: currentEmail, actorUid: currentUid,
-            details: result.details.join("; ").slice(0, 500),
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          }).catch(err => console.warn("Audit log unavailable:", err.code || err.message));
-        }
         committed = true;
         lastSyncedRows[tab] = cloneRows(result.rows);
         if (sheetEditVersion[tab] === revision) {
