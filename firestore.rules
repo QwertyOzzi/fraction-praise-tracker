@@ -64,6 +64,12 @@ service cloud.firestore {
 
     // Telegram bot agent actions use a completely separate, immutable audit
     // collection. No staff account or public website may read or forge it.
+    // Preparation for a future optional migration to independent agent docs.
+    // No application reads or writes these documents until a reviewed cutover.
+    match /agent_directory_v2/{agentId} {
+      allow read, write: if isOwner();
+    }
+
     match /agent_action_logs/{eventId} {
       allow read, create: if isOwner();
       allow update, delete: if false;
