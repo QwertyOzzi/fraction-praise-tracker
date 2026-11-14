@@ -82,6 +82,12 @@ service cloud.firestore {
       allow read, create, update: if isOwner();
       allow delete: if false;
     }
+    // One private, read-only Telegram HTML widget per agent.
+    // Only the bot's existing owner Firebase identity can read or edit these.
+    match /fbi_profile_widgets/{telegramUserId} {
+      allow read, create, update, delete: if isOwner();
+    }
+
     match /support_tickets/{ticketId} {
       // Public users must submit tickets through the rate-limited bot API.
       // The bot authenticates as the Firebase owner; staff may also create tickets.
